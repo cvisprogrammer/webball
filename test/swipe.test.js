@@ -1,0 +1,41 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { createSwipe, moveSwipe, swipeGesture } from '../public/swipe.js';
+import { shotSpeed, simulateShot } from '../public/physics.js';
+
+test('a steady flick uses the original launch speed and the guide matches its release',()=>{
+  const swipe=createSwipe({x:.5,y:.8},0,1);
+  for(let time=40;time<=320;time+=40)moveSwipe(swipe,{x:.5,y:.8-.35*time/320},time);
+  const preview=swipeGesture(swipe,320);
+  moveSwipe(swipe,{...swipe.to},320);
+  const release=swipeGesture(swipe,320);
+  assert.ok(Math.abs(preview.velocity-.35/.32)<1e-9);
+  assert.equal(shotSpeed(preview),shotSpeed(release));
+  assert.equal(simulateShot(release).made,true);
+});
+
+test('the recent flick controls velocity even after an initial slow drag or hold',()=>{
+  const swipe=createSwipe({x:.5,y:.8},0,1);
+  moveSwipe(swipe,{x:.5,y:.8},800);
+  moveSwipe(swipe,{x:.5,y:.79},1000);
+  moveSwipe(swipe,{x:.5,y:.69},1040);
+  moveSwipe(swipe,{x:.5,y:.59},1080);
+  const gesture=swipeGesture(swipe,1080);
+  assert.ok(Math.abs(gesture.velocity-2.5)<1e-9,'uses the final flick rather than averaging in the earlier hold');
+  assert.ok(shotSpeed(gesture)>shotSpeed({...gesture,velocity:undefined})+4);
+});
+
+test('slowing, pausing and reversing affect the live guide and release together',()=>{
+  const swipe=createSwipe({x:.5,y:.8},0,1);
+  moveSwipe(swipe,{x:.5,y:.6},80);
+  const fast=swipeGesture(swipe,80);
+  moveSwipe(swipe,{x:.5,y:.57},160);
+  const slow=swipeGesture(swipe,160);
+  assert.ok(shotSpeed(slow)<shotSpeed(fast));
+  const stopped=swipeGesture(swipe,260);
+  assert.equal(stopped.velocity,0);
+  moveSwipe(swipe,{...swipe.to},260);
+  assert.equal(shotSpeed(swipeGesture(swipe,260)),shotSpeed(stopped));
+  moveSwipe(swipe,{x:.5,y:.67},340);
+  assert.equal(swipeGesture(swipe,340).velocity,0,'a downward reversal does not count as an upward flick');
+});

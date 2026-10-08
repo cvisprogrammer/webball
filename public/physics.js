@@ -4,7 +4,7 @@ export const HOOP = { x: 0, y: 3.05, z: 0, radius: .23 };
 const clamp = (v, low, high) => Math.max(low, Math.min(high, v));
 export const START_POSITION = { x: 0, z: 6 };
 export const MAX_SHOT_SPEED = 17;
-export const shotSpeed = gesture => clamp(3.8 + gesture.dy * 7 + gesture.dy / Math.max(.08,gesture.duration) * 2.3, 4.5, MAX_SHOT_SPEED);
+export const shotSpeed = gesture => clamp(3.8 + gesture.dy * 7 + (gesture.velocity ?? gesture.dy / Math.max(.08,gesture.duration)) * 2.3, 4.5, MAX_SHOT_SPEED);
 const launchAngle = distance => distance < .11 ? Math.PI/2 : Math.atan2(1.45+1.358*distance,distance);
 export function cameraPose(player = START_POSITION, focus = null) {
   const distance = Math.hypot(player.x, player.z) || 1;
@@ -47,7 +47,8 @@ export function reboundPosition(trajectory,elapsed,player=START_POSITION) {
 }
 export const reboundDuration = trajectory => trajectory.frames ? trajectory.duration : REBOUND_DURATION;
 export function validGesture(g) {
-  return g && ['dx', 'dy', 'duration'].every(k => Number.isFinite(g[k])) && Math.abs(g.dx) <= .8 && g.dy >= .08 && g.dy <= .85 && g.duration >= .08 && g.duration <= 6;
+  return g && ['dx', 'dy', 'duration'].every(k => Number.isFinite(g[k])) && Math.abs(g.dx) <= .8 && g.dy >= .08 && g.dy <= .85 && g.duration >= .08 && g.duration <= 2 &&
+    (g.velocity === undefined || (Number.isFinite(g.velocity) && g.velocity >= 0 && g.velocity <= 100));
 }
 export function simulateShot(gesture, origin = START_POSITION) {
   if (!validGesture(gesture)) throw new Error('Swipe upward from the ball to shoot');

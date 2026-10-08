@@ -1,6 +1,7 @@
 import { reboundPosition, reboundDuration, simulateShot, validGesture, sampleFrames, project, reboundWorld, START_POSITION, shotSpeed, shotGuide, MAX_SHOT_SPEED } from './physics.js';
 import { createCourt, pointerPosition } from './court3d.js';
 import { createPractice, practiceAction } from './practice.js';
+import { createSwipe, moveSwipe, swipeGesture } from './swipe.js';
 const $ = id => document.getElementById(id);
 const canvas = $('court');
 let drawCourt, graphicsReady = true;
@@ -131,19 +132,21 @@ canvas.addEventListener('pointerdown', event => {
   const ball = project({ x: player.x, y: 1.6, z: player.z },player);
   if (swipe || !canShoot() || Math.hypot(point.x - ball.x, point.y - ball.y) > .1) return;
   event.preventDefault(); canvas.setPointerCapture(event.pointerId);
-  swipe = { from: point, to: point, start: event.timeStamp, pointer: event.pointerId };
+  swipe = createSwipe(point, event.timeStamp, event.pointerId);
   updateRangeGuide(event.timeStamp);
   message(''); canvas.focus();
 });
 canvas.addEventListener('pointermove', event => {
   if (!swipe || swipe.pointer !== event.pointerId) return;
-  swipe.to = pointerPosition(canvas, event);
+  const events = event.getCoalescedEvents?.() || [];
+  for (const sample of events) moveSwipe(swipe, pointerPosition(canvas, sample), sample.timeStamp);
+  moveSwipe(swipe, pointerPosition(canvas, event), event.timeStamp);
   updateRangeGuide(event.timeStamp);
 });
 canvas.addEventListener('pointerup', event => {
   if (!swipe || swipe.pointer !== event.pointerId) return;
-  const end = pointerPosition(canvas, event), gesture = { dx: end.x - swipe.from.x,
-    dy: swipe.from.y - end.y, duration: Math.max(.08, (event.timeStamp - swipe.start) / 1000) };
+  moveSwipe(swipe, pointerPosition(canvas, event), event.timeStamp);
+  const gesture = swipeGesture(swipe, event.timeStamp);
   swipe = null; canvas.releasePointerCapture(event.pointerId); takeShot(gesture);
 });
 canvas.addEventListener('pointercancel', () => { swipe = null; $('power').value = 0; });
@@ -159,16 +162,16 @@ function updateRangeGuide(time=performance.now()) {
   display.hidden=!canShoot();
   if(display.hidden)return;
   const player=playerPosition(),guide=shotGuide(player);
-  const gesture=swipe ? {dx:swipe.to.x-swipe.from.x,dy:swipe.from.y-swipe.to.y,duration:Math.max(.08,(time-swipe.start)/1000)} : null;
+  const gesture=swipe ? swipeGesture(swipe,time) : null;
   const speed=gesture && gesture.dy>0 ? shotSpeed(gesture) : 0;
   const distance=Math.hypot(player.x,player.z);
   const aimed=gesture && Math.abs(gesture.dx/Math.max(.001,gesture.dy))*distance<.08;
-  const aligned=gesture && validGesture(gesture) && aimed && guide.reachable && speed>=guide.minSpeed && speed<=guide.maxSpeed;
+  const aligned=gesture && gesture.velocity>=.05 && validGesture(gesture) && aimed && guide.reachable && speed>=guide.minSpeed && speed<=guide.maxSpeed;
   display.style.setProperty('--target-level',`${guide.speed/MAX_SHOT_SPEED*100}%`);
   display.style.setProperty('--power-level',`${speed/MAX_SHOT_SPEED*100}%`);
   display.classList.toggle('aligned',!!aligned);
   $('range-distance').textContent=`${distance.toFixed(1)} m`;
-  $('range-status').textContent=!gesture ? 'Hold ball' : gesture.dy<.08 ? 'Drag upward' : gesture.duration>6 ? 'Try again' : !aimed ? 'Aim straight' : aligned ? 'Release!' : speed>guide.maxSpeed ? 'Less power' : 'More power';
+  $('range-status').textContent=!gesture ? 'Hold ball' : gesture.dy<.08 ? 'Flick upward' : gesture.duration>2 ? 'Try again' : !aimed ? 'Aim straight' : gesture.velocity<.05 ? 'Keep moving' : aligned ? 'On target' : speed>guide.maxSpeed ? 'Swipe slower' : 'Swipe faster';
   $('power').value=speed;
   $('power').setAttribute('aria-valuetext',`${speed.toFixed(1)} meters per second; target ${guide.speed.toFixed(1)}`);
 }

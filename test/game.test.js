@@ -39,7 +39,8 @@ test('two players shoot, save an offline rebound, resume after restart and catch
     let state = second.data;
     const action = async (cookie, body) => request(`/api/action?id=${id}`, { version: state.version, ...body }, cookie);
     assert.equal((await action(p1, { action: 'shoot', gesture: { dx: 0, dy: .35, duration: .32 } })).status, 409);
-    state = (await action(p0, { action: 'shoot', gesture: { dx: 0, dy: .35, duration: .32 } })).data;
+    assert.equal((await action(p0, { action: 'shoot', gesture: { dx: 0, dy: .35, duration: .32, velocity: null } })).status, 400);
+    state = (await action(p0, { action: 'shoot', gesture: { dx: 0, dy: .35, duration: .32, velocity: .35/.32 } })).data;
     assert.deepEqual(state.scores, [2, 0]); assert.equal(state.turn, 1);
     const staleVersion = state.version;
     state = (await action(p1, { action: 'shoot', gesture: { dx: .2, dy: .35, duration: .32 } })).data;
@@ -77,6 +78,7 @@ test('two players shoot, save an offline rebound, resume after restart and catch
     assert.deepEqual(state.rebounds, [1, 1]);
     assert.equal(state.phase, 'shoot');
     assert.equal((await fetch(base + '/')).status, 200);
+    assert.equal((await fetch(base + '/swipe.js')).status, 200);
   } finally {
     if (server?.listening) await new Promise(resolve => server.close(resolve));
     await rm(dataDir, { recursive: true, force: true });

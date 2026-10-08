@@ -80,11 +80,22 @@ test('range guide target scores in the real simulation and adapts to the catch p
     const guide=shotGuide(origin);
     assert.equal(guide.reachable,true);
     assert.ok(guide.speed>=guide.minSpeed && guide.speed<=guide.maxSpeed);
-    const gesture={dx:0,dy:(guide.speed-3.8)/(7+2.3/.32),duration:.32};
+    const dy=(guide.speed-3.8)/(7+2.3/.32);
+    const gesture={dx:0,dy,duration:.32,velocity:dy/.32};
     assert.ok(Math.abs(shotSpeed(gesture)-guide.speed)<1e-9);
     assert.equal(simulateShot(gesture,origin).made,true,'releasing at the target with straight aim scores');
     targets.push(guide.speed);
   }
   assert.ok(targets[0]>targets[1]+1,'a farther shot needs a higher target velocity');
-  assert.equal(validGesture({dx:0,dy:.4,duration:3}),true,'a player can pause to line up the meter');
+  assert.equal(validGesture({dx:0,dy:.4,duration:3}),false,'shoot with a deliberate flick rather than holding to charge');
+});
+
+test('recent swipe velocity sets launch power and legacy gestures keep their original physics',()=>{
+  const gesture={dx:0,dy:.35,duration:.32};
+  const original=simulateShot(gesture);
+  assert.deepEqual(simulateShot({...gesture,velocity:.35/.32}).flight,original.flight);
+  const fast=simulateShot({...gesture,velocity:3});
+  const slow=simulateShot({...gesture,velocity:.4});
+  assert.ok(sampleFrames(fast.flight,100).z<sampleFrames(slow.flight,100).z);
+  for(const velocity of [NaN,Infinity,-1,101,null,'1'])assert.equal(validGesture({...gesture,velocity}),false);
 });
