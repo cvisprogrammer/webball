@@ -38,11 +38,11 @@ test('two players shoot, save an offline rebound, resume after restart and catch
     assert.equal((await request('/api/join', { id, invite, name: 'Third' })).status, 409);
     let state = second.data;
     const action = async (cookie, body) => request(`/api/action?id=${id}`, { version: state.version, ...body }, cookie);
-    assert.equal((await action(p1, { action: 'shoot', aim: .5 })).status, 409);
-    state = (await action(p0, { action: 'shoot', aim: .5 })).data;
+    assert.equal((await action(p1, { action: 'shoot', gesture: { dx: 0, dy: .34, duration: .32 } })).status, 409);
+    state = (await action(p0, { action: 'shoot', gesture: { dx: 0, dy: .34, duration: .32 } })).data;
     assert.deepEqual(state.scores, [2, 0]); assert.equal(state.turn, 1);
     const staleVersion = state.version;
-    state = (await action(p1, { action: 'shoot', aim: .75 })).data;
+    state = (await action(p1, { action: 'shoot', gesture: { dx: .2, dy: .34, duration: .32 } })).data;
     assert.equal(state.phase, 'rebound'); assert.equal(state.turn, 0);
     assert.equal(state.startedAt, null);
     assert.equal((await request(`/api/action?id=${id}`, { action: 'start', version: staleVersion }, p0)).status, 409);
@@ -58,9 +58,9 @@ test('two players shoot, save an offline rebound, resume after restart and catch
     let ball = reboundPosition(trajectory, 1000);
     state = (await action(p0, { action: 'catch', ...ball })).data;
     assert.equal(state.phase, 'shoot'); assert.deepEqual(state.rebounds, [1, 0]); assert.equal(state.turn, 0);
-    state = (await action(p0, { action: 'shoot', aim: .2 })).data;
+    state = (await action(p0, { action: 'shoot', gesture: { dx: -.2, dy: .34, duration: .32 } })).data;
     state = (await action(p1, { action: 'start' })).data;
-    time += 9000;
+    time += 13000;
     assert.equal((await action(p1, { action: 'catch', x: .1, y: .8 })).status, 409);
     state = (await action(p1, { action: 'start' })).data;
     ball = reboundPosition(state.trajectory, 0);

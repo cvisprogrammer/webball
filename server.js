@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { reboundPosition, REBOUND_DURATION, shotResult } from './public/physics.js';
+import { reboundPosition, reboundDuration, validGesture, simulateShot } from './public/physics.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const token = () => randomBytes(24).toString('hex');
@@ -77,10 +77,11 @@ export async function createGameServer({ dataDir = path.join(root, '.data'), now
         if (body.version !== game.version) throw fail(409, 'The turn changed. Refresh and try again.');
         if (game.turn !== seat) throw fail(409, 'It is the other player’s turn');
         if (body.action === 'shoot' && game.phase === 'shoot') {
-          if (!Number.isFinite(body.aim) || body.aim < .1 || body.aim > .9) throw fail(400, 'Invalid aim');
-          if (shotResult(body.aim)) { game.scores[seat] += 2; game.turn = 1 - seat; }
+          if (!validGesture(body.gesture)) throw fail(400, 'Swipe upward from the ball to shoot');
+          const trajectory = simulateShot(body.gesture);
+          if (trajectory.made) { game.scores[seat] += 2; game.turn = 1 - seat; }
           else {
-            game.trajectory = { direction: body.aim < .5 ? -1 : 1, aim: body.aim, savedAt: now() };
+            game.trajectory = trajectory;
             game.turn = 1 - seat; game.phase = 'rebound'; game.startedAt = null;
           }
         } else if (body.action === 'start' && game.phase === 'rebound') {
@@ -88,10 +89,10 @@ export async function createGameServer({ dataDir = path.join(root, '.data'), now
           game.startedAt = now();
         } else if (body.action === 'catch' && game.phase === 'rebound' && game.startedAt !== null) {
           const elapsed = now() - game.startedAt;
-          if (!Number.isFinite(body.x) || !Number.isFinite(body.y) || elapsed < 0 || elapsed > REBOUND_DURATION)
+          if (!Number.isFinite(body.x) || !Number.isFinite(body.y) || elapsed < 0 || elapsed > reboundDuration(game.trajectory))
             throw fail(409, 'The ball got away. Replay the rebound.');
           const ball = reboundPosition(game.trajectory, elapsed);
-          if (Math.hypot(body.x - ball.x, body.y - ball.y) > .085) throw fail(400, 'Tap closer to the ball');
+          if (Math.hypot(body.x - ball.x, body.y - ball.y) > .06) throw fail(400, 'Tap closer to the ball');
           game.rebounds[seat]++; game.phase = 'shoot'; game.trajectory = null; game.startedAt = null;
         } else throw fail(409, 'That action is unavailable');
         game.version++; await save(); result = view(game, seat);
@@ -116,7 +117,7 @@ export async function createGameServer({ dataDir = path.join(root, '.data'), now
       } else {
         if (req.method !== 'GET' && req.method !== 'HEAD') throw fail(405, 'Method not allowed');
         const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'],
-          '/physics.js': ['physics.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'] };
+          '/physics.js': ['physics.js', 'text/javascript'], '/court3d.js': ['court3d.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'] };
         const entry = files[url.pathname];
         if (!entry) throw fail(404, 'Not found');
         const content = await readFile(path.join(root, 'public', entry[0]));
