@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { simulateShot, sampleFrames, BALL_RADIUS, project, reboundPosition, validGesture } from '../public/physics.js';
+import { simulateShot, sampleFrames, BALL_RADIUS, project, reboundPosition, validGesture, shotGuide, shotSpeed } from '../public/physics.js';
 import { cameraPose } from '../public/physics.js';
 import { PerspectiveCamera, Vector3 } from 'three';
 
@@ -71,4 +71,20 @@ test('shots from nearby and sideways catch locations can reach the basket', () =
     }
     assert.ok(basket,'a suitable swipe can score from the catch location');
   }
+});
+
+test('range guide target scores in the real simulation and adapts to the catch position',()=>{
+  const origins=[{x:0,z:6},{x:1,z:2},{x:.1,z:0},{x:2,z:-1}];
+  const targets=[];
+  for(const origin of origins) {
+    const guide=shotGuide(origin);
+    assert.equal(guide.reachable,true);
+    assert.ok(guide.speed>=guide.minSpeed && guide.speed<=guide.maxSpeed);
+    const gesture={dx:0,dy:(guide.speed-3.8)/(7+2.3/.32),duration:.32};
+    assert.ok(Math.abs(shotSpeed(gesture)-guide.speed)<1e-9);
+    assert.equal(simulateShot(gesture,origin).made,true,'releasing at the target with straight aim scores');
+    targets.push(guide.speed);
+  }
+  assert.ok(targets[0]>targets[1]+1,'a farther shot needs a higher target velocity');
+  assert.equal(validGesture({dx:0,dy:.4,duration:3}),true,'a player can pause to line up the meter');
 });

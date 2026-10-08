@@ -12,7 +12,7 @@ npm start
 
 Open the server on port 3000 to practice immediately without a name or second player. Solo stats last for the current page session. For two players, choose Invite a friend, enter a player name, and share the invite link. Use separate browsers or browser profiles for the two players. Returning players should use their original browser and game link: an HTTP-only cookie identifies their seat. The home page opens solo mode; Return to your game opens your last match. Solo practice does not change a saved multiplayer match. Player names are display names, not password accounts.
 
-Press and hold the ball, drag upward, then release to shoot. Use touch on a screen or click-and-drag on a mouse or trackpad. Hovering, scrolling, and pressing elsewhere on the court do not shoot. Drag direction sets lateral aim; length and release speed set launch power. A faster flick of the same length launches farther and can overshoot. A smooth upward flick of roughly a third of the court height is a useful starting point. Short, sideways, and overpowered flicks miss; shots can also bounce off the rim or backboard.
+Press and hold the ball, drag upward, then release to shoot. Use touch on a screen or click-and-drag on a mouse or trackpad. Hovering, scrolling, and pressing elsewhere on the court do not shoot. Drag direction sets lateral aim; length and release speed set launch power. A faster flick of the same length launches farther and can overshoot. The range guide on the right shows a green target line calibrated against the actual shot physics for your current catch location, and a white power line that updates throughout your drag. Keep your drag straight and release when the lines meet and the guide says Release! It also suggests more power, less power, or straighter aim. You can hold a drag for up to six seconds; pausing reduces its average release speed. Short, sideways, and overpowered flicks miss; shots can also bounce off the rim or backboard.
 
 In solo mode, a miss automatically continues into your rebound: tap the moving ball to catch it and shoot from that spot, or choose Return to starting spot. In a match, press Play the rebound first. During a rebound, Space also catches the ball when the court is focused. If the ball escapes or you leave, replay the saved bounce when you return.
 
@@ -22,7 +22,7 @@ The court is a real Three.js WebGL scene with textured meshes, lighting, shadows
 npm test
 ```
 
-Tests cover solo stats and rebounds, both match seats, turn enforcement, gesture-based scoring, saved rebounds across a server restart, catch validation, replay after timeout, deterministic trajectories, floor bounds, decreasing bounce energy, rim/backboard deflections, saved catch locations, WebGL camera agreement, and flick speed. Browser checks exercise hover and scroll prevention, starting a drag on the ball, mouse/touch shooting, and switching between solo mode and a match.
+Tests cover solo stats and rebounds, both match seats, turn enforcement, gesture-based scoring, saved rebounds across a server restart, catch validation, replay after timeout, deterministic trajectories, floor bounds, decreasing bounce energy, rim/backboard deflections, saved catch locations, WebGL camera agreement, flick speed, and scoring at the range guide target from different catch locations. Browser checks exercise hover and scroll prevention, starting a drag on the ball, mouse/touch shooting, switching between solo mode and a match, live range feedback, and recalibration after catching a rebound.
 
 ## Persistence and hosting
 

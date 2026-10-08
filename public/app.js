@@ -1,4 +1,4 @@
-import { reboundPosition, reboundDuration, simulateShot, validGesture, sampleFrames, project, reboundWorld, START_POSITION } from './physics.js';
+import { reboundPosition, reboundDuration, simulateShot, validGesture, sampleFrames, project, reboundWorld, START_POSITION, shotSpeed, shotGuide, MAX_SHOT_SPEED } from './physics.js';
 import { createCourt, pointerPosition } from './court3d.js';
 import { createPractice, practiceAction } from './practice.js';
 const $ = id => document.getElementById(id);
@@ -37,6 +37,7 @@ function render() {
   if(game.solo) { $('p0').textContent='YOU'; $('p1').textContent='SHOTS'; $('s1').textContent=game.attempts; $('r1').textContent=`${game.attempts ? Math.round(game.baskets/game.attempts*100) : 0}% made`; }
   document.querySelector('.versus').textContent=game.solo?'·':'VS';
   const yours = game.turn === game.seat;
+  updateRangeGuide();
   $('shot-location').textContent = `${Math.hypot(playerPosition().x,playerPosition().z).toFixed(1)} m from the hoop · your rebound sets your next shot`;
   $('turn-label').textContent = game.solo ? 'SOLO · FIND YOUR TOUCH' : game.phase === 'waiting' ? 'INVITE YOUR TEAMMATE' : yours ? 'YOUR TURN' : 'SAVED · WAITING FOR PLAYER';
   $('invite-row').hidden = !game.invite;
@@ -131,12 +132,13 @@ canvas.addEventListener('pointerdown', event => {
   if (swipe || !canShoot() || Math.hypot(point.x - ball.x, point.y - ball.y) > .1) return;
   event.preventDefault(); canvas.setPointerCapture(event.pointerId);
   swipe = { from: point, to: point, start: event.timeStamp, pointer: event.pointerId };
+  updateRangeGuide(event.timeStamp);
   message(''); canvas.focus();
 });
 canvas.addEventListener('pointermove', event => {
   if (!swipe || swipe.pointer !== event.pointerId) return;
   swipe.to = pointerPosition(canvas, event);
-  $('power').value = Math.min(1, Math.max(0, (swipe.from.y - swipe.to.y) / .6));
+  updateRangeGuide(event.timeStamp);
 });
 canvas.addEventListener('pointerup', event => {
   if (!swipe || swipe.pointer !== event.pointerId) return;
@@ -152,6 +154,24 @@ canvas.addEventListener('keydown', event => {
 });
 canvas.addEventListener('blur', () => { swipe=null;$('power').value=0; });
 window.addEventListener('blur', () => { swipe=null;$('power').value=0; });
+function updateRangeGuide(time=performance.now()) {
+  const display=$('range-display');
+  display.hidden=!canShoot();
+  if(display.hidden)return;
+  const player=playerPosition(),guide=shotGuide(player);
+  const gesture=swipe ? {dx:swipe.to.x-swipe.from.x,dy:swipe.from.y-swipe.to.y,duration:Math.max(.08,(time-swipe.start)/1000)} : null;
+  const speed=gesture && gesture.dy>0 ? shotSpeed(gesture) : 0;
+  const distance=Math.hypot(player.x,player.z);
+  const aimed=gesture && Math.abs(gesture.dx/Math.max(.001,gesture.dy))*distance<.08;
+  const aligned=gesture && validGesture(gesture) && aimed && guide.reachable && speed>=guide.minSpeed && speed<=guide.maxSpeed;
+  display.style.setProperty('--target-level',`${guide.speed/MAX_SHOT_SPEED*100}%`);
+  display.style.setProperty('--power-level',`${speed/MAX_SHOT_SPEED*100}%`);
+  display.classList.toggle('aligned',!!aligned);
+  $('range-distance').textContent=`${distance.toFixed(1)} m`;
+  $('range-status').textContent=!gesture ? 'Hold ball' : gesture.dy<.08 ? 'Drag upward' : gesture.duration>6 ? 'Try again' : !aimed ? 'Aim straight' : aligned ? 'Release!' : speed>guide.maxSpeed ? 'Less power' : 'More power';
+  $('power').value=speed;
+  $('power').setAttribute('aria-valuetext',`${speed.toFixed(1)} meters per second; target ${guide.speed.toFixed(1)}`);
+}
 function draw() {
   let player=playerPosition(),position={x:player.x,y:1.6,z:player.z},focus=null;
   if(shot) {
@@ -171,6 +191,7 @@ function draw() {
     position=reboundWorld(game.trajectory,elapsed);focus=position;
     if(playback && elapsed>reboundDuration(playback.trajectory)){playback=null;message('It got away! Replay the saved rebound.');render();}
   }
+  updateRangeGuide();
   drawCourt({position,player,focus,time:performance.now(),ready:canShoot(),moving:Boolean(shot||playback)});
   requestAnimationFrame(draw);
 }

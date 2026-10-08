@@ -3,6 +3,9 @@ export const BALL_RADIUS = .12;
 export const HOOP = { x: 0, y: 3.05, z: 0, radius: .23 };
 const clamp = (v, low, high) => Math.max(low, Math.min(high, v));
 export const START_POSITION = { x: 0, z: 6 };
+export const MAX_SHOT_SPEED = 17;
+export const shotSpeed = gesture => clamp(3.8 + gesture.dy * 7 + gesture.dy / Math.max(.08,gesture.duration) * 2.3, 4.5, MAX_SHOT_SPEED);
+const launchAngle = distance => distance < .11 ? Math.PI/2 : Math.atan2(1.45+1.358*distance,distance);
 export function cameraPose(player = START_POSITION, focus = null) {
   const distance = Math.hypot(player.x, player.z) || 1;
   const forward = { x: -player.x / distance, z: -player.z / distance };
@@ -44,16 +47,16 @@ export function reboundPosition(trajectory,elapsed,player=START_POSITION) {
 }
 export const reboundDuration = trajectory => trajectory.frames ? trajectory.duration : REBOUND_DURATION;
 export function validGesture(g) {
-  return g && ['dx', 'dy', 'duration'].every(k => Number.isFinite(g[k])) && Math.abs(g.dx) <= .8 && g.dy >= .08 && g.dy <= .85 && g.duration >= .08 && g.duration <= 2;
+  return g && ['dx', 'dy', 'duration'].every(k => Number.isFinite(g[k])) && Math.abs(g.dx) <= .8 && g.dy >= .08 && g.dy <= .85 && g.duration >= .08 && g.duration <= 6;
 }
 export function simulateShot(gesture, origin = START_POSITION) {
   if (!validGesture(gesture)) throw new Error('Swipe upward from the ball to shoot');
-  const speed = clamp(3.8 + gesture.dy * 7 + gesture.dy / gesture.duration * 2.3, 4.5, 17);
+  const speed = shotSpeed(gesture);
   const distance = Math.hypot(origin.x,origin.z);
   const forward = {x:-origin.x/(distance||1),z:-origin.z/(distance||1)};
   if(origin.x===0 && origin.z===0)forward.z=-1;
   const side=clamp(gesture.dx/gesture.dy,-1.5,1.5);
-  const angle=distance<.11 ? Math.PI/2 : Math.atan2(1.45+1.358*distance,distance);
+  const angle=launchAngle(distance);
   const flat=speed*Math.cos(angle);
   let vx=flat*(forward.x-side*forward.z), vz=flat*(forward.z+side*forward.x);
   let vy = speed * Math.sin(angle);
@@ -104,4 +107,35 @@ export function simulateShot(gesture, origin = START_POSITION) {
   const flight = [...frames.filter(f => f[0] < split), [split, start.x, start.y, start.z]];
   return { version: 3, frames: rebound, flight: made ? frames.filter(f => f[0] <= 3) : flight,
     duration: rebound.at(-1)[0] * 1000, flightDuration: made ? 3000 : split * 1000, made, feedback, gesture, origin: {x:origin.x,z:origin.z} };
+}
+
+const guideCache = new Map();
+export function shotGuide(origin = START_POSITION) {
+  const key=`${origin.x},${origin.z}`;
+  if(guideCache.has(key))return guideCache.get(key);
+  const distance=Math.hypot(origin.x,origin.z),angle=launchAngle(distance);
+  const estimate=distance<.11 ? 6 : Math.sqrt(9.81*distance*distance/(2*Math.cos(angle)**2*(distance*Math.tan(angle)-1.45)));
+  // Find a generous successful release interval in the actual simulation,
+  // including its gravity, air drag, rim and backboard collisions.
+  const makes = speed => speed>=5 && speed<=15.8 && simulateShot({dx:0,dy:(speed-3.8)/(7+2.3/.32),duration:.32},origin).made;
+  let best=null;
+  function search(low,high,step) {
+    let band=null;
+    for(let speed=Math.max(5,low);speed<=Math.min(15.8,high)+1e-9;speed+=step) {
+      if(makes(speed)) {
+        band ||= {minSpeed:speed,maxSpeed:speed};band.maxSpeed=speed;
+        if(!best || band.maxSpeed-band.minSpeed > best.maxSpeed-best.minSpeed)best={...band};
+      } else band=null;
+    }
+  }
+  search(estimate-.5,estimate+.5,.01);
+  if(!best)search(5,15.8,.03);
+  if(best){const broad=best;best=null;search(broad.minSpeed,broad.maxSpeed,.002);best ||= broad;}
+  if(best) {
+    for(let i=0;i<5 && makes(best.minSpeed-.002);i++)best.minSpeed-=.002;
+    for(let i=0;i<5 && makes(best.maxSpeed+.002);i++)best.maxSpeed+=.002;
+  }
+  const speed=best?(best.minSpeed+best.maxSpeed)/2:clamp(estimate,5,15.8);
+  const guide={speed:best && !makes(speed)?best.minSpeed:speed,minSpeed:best?.minSpeed??speed,maxSpeed:best?.maxSpeed??speed,reachable:!!best};
+  if(guideCache.size>200)guideCache.clear();guideCache.set(key,guide);return guide;
 }
