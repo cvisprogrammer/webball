@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import { simulateShot, sampleFrames, BALL_RADIUS, project, reboundPosition, validGesture } from '../public/physics.js';
 import { cameraPose } from '../public/physics.js';
 import { PerspectiveCamera, Vector3 } from 'three';
-import { wheelGesture } from '../public/gestures.js';
 
 test('swipe power and direction affect scoring; simulation replays deterministically', () => {
   const good = { dx: 0, dy: .35, duration: .32 };
@@ -53,14 +52,13 @@ test('first-person catch projection matches the WebGL camera from different posi
   }
 });
 
-test('equal-length trackpad swipes launch farther when faster; line deltas also work', () => {
-  const slow=wheelGesture([{dx:0,dy:-110,time:0},{dx:0,dy:-110,time:400}],650);
-  const fast=wheelGesture([{dx:0,dy:-110,time:0},{dx:0,dy:-110,time:100}],650);
+test('equal-length deliberate flicks launch farther when faster', () => {
+  const slow={dx:0,dy:.35,duration:.4};
+  const fast={dx:0,dy:.35,duration:.1};
   const slowShot=simulateShot(slow),fastShot=simulateShot(fast);
   const slowStart=sampleFrames(slowShot.flight,100),fastStart=sampleFrames(fastShot.flight,100);
   assert.ok(fastStart.z<slowStart.z,'faster flick has more forward velocity');
   assert.equal(fastShot.made,false,'overpowered shot misses');
-  assert.equal(wheelGesture([{dx:0,dy:2,mode:1,time:0}],640).dy,.05);
 });
 
 test('shots from nearby and sideways catch locations can reach the basket', () => {

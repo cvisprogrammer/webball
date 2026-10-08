@@ -1,6 +1,6 @@
 # Webball
 
-A two-player browser basketball game. Invite a friend, aim a shot, and tap the moving ball to catch a rebound. You do not need to play at the same time: a miss stores a deterministic bounce on the server, and the next player starts that bounce when they return. A catch earns the next shot; a basket earns two points and passes the turn.
+A browser basketball game with instant solo shootaround and asynchronous two-player games. On first visiting the home page, shoot right away, catch your own rebounds, and track your shots and baskets. Choose Invite a friend to start a two-player match. In a match, a miss stores a deterministic bounce on the server, and the next player starts that bounce when they return. A catch earns the next shot; a basket earns two points and passes the turn.
 
 ## Run
 
@@ -10,11 +10,11 @@ Requires Node.js 22 or newer. Install the pinned Three.js dependency once with `
 npm start
 ```
 
-Open the server on port 3000, enter a player name, and share the invite link with your friend. Use separate browsers or browser profiles for the two players. Returning players should use their original browser and game link: an HTTP-only cookie identifies their seat. Player names are display names, not password accounts.
+Open the server on port 3000 to practice immediately without a name or second player. Solo stats last for the current page session. For two players, choose Invite a friend, enter a player name, and share the invite link. Use separate browsers or browser profiles for the two players. Returning players should use their original browser and game link: an HTTP-only cookie identifies their seat. The home page opens solo mode; Return to your game opens your last match. Solo practice does not change a saved multiplayer match. Player names are display names, not password accounts.
 
-Swipe upward starting on the ball with your finger or mouse. On a trackpad, swipe/scroll directly over the court; no click is needed. Either scroll direction works because OS natural-scrolling settings differ. Swipe direction sets lateral aim; length and release speed set launch power. A faster swipe of the same length launches farther and can overshoot. A smooth upward flick of roughly a third of the court height is a useful starting point. Short, sideways, and overpowered swipes miss; shots can also bounce off the rim or backboard.
+Press and hold the ball, drag upward, then release to shoot. Use touch on a screen or click-and-drag on a mouse or trackpad. Hovering, scrolling, and pressing elsewhere on the court do not shoot. Drag direction sets lateral aim; length and release speed set launch power. A faster flick of the same length launches farther and can overshoot. A smooth upward flick of roughly a third of the court height is a useful starting point. Short, sideways, and overpowered flicks miss; shots can also bounce off the rim or backboard.
 
-For rebounds, press Play the rebound and tap the moving ball. Keyboard players can focus the court, adjust aim with Left/Right, then hold and release Space to charge and shoot. During a rebound, Space catches the ball. If the ball escapes or you leave, replay the saved bounce when you return.
+In solo mode, a miss automatically continues into your rebound: tap the moving ball to catch it and shoot from that spot, or choose Return to starting spot. In a match, press Play the rebound first. During a rebound, Space also catches the ball when the court is focused. If the ball escapes or you leave, replay the saved bounce when you return.
 
 The court is a real Three.js WebGL scene with textured meshes, lighting, shadows, and a camera at player eye level. The camera follows the ball during a shot or rebound. A catch saves its exact court coordinates for that player; their next shot and view use that location, including after a reload or server restart. The shared simulation uses gravity, sphere/rim and backboard collisions, floor restitution, and friction. Misses store the simulated 3D path after the first impact; replaying it continues exactly where the shooting animation ends. Older saved rebounds remain playable.
 
@@ -22,7 +22,7 @@ The court is a real Three.js WebGL scene with textured meshes, lighting, shadows
 npm test
 ```
 
-Tests cover both seats, turn enforcement, gesture-based scoring, saved rebounds across a server restart, catch validation, replay after timeout, deterministic trajectories, floor bounds, decreasing bounce energy, rim/backboard deflections, saved catch locations, WebGL camera agreement, and direct trackpad swipe speed.
+Tests cover solo stats and rebounds, both match seats, turn enforcement, gesture-based scoring, saved rebounds across a server restart, catch validation, replay after timeout, deterministic trajectories, floor bounds, decreasing bounce energy, rim/backboard deflections, saved catch locations, WebGL camera agreement, and flick speed. Browser checks exercise hover and scroll prevention, starting a drag on the ball, mouse/touch shooting, and switching between solo mode and a match.
 
 ## Persistence and hosting
 

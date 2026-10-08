@@ -120,7 +120,7 @@ export async function createGameServer({ dataDir = path.join(root, '.data'), now
       } else {
         if (req.method !== 'GET' && req.method !== 'HEAD') throw fail(405, 'Method not allowed');
         const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'],
-          '/physics.js': ['physics.js', 'text/javascript'], '/gestures.js': ['gestures.js', 'text/javascript'], '/court3d.js': ['court3d.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'] };
+          '/physics.js': ['physics.js', 'text/javascript'], '/practice.js': ['practice.js', 'text/javascript'], '/court3d.js': ['court3d.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'] };
         const vendors = { '/vendor/three.module.js': 'three.module.js', '/vendor/three.core.js': 'three.core.js' };
         if(vendors[url.pathname]) {
           const content=await readFile(path.join(root,'node_modules/three/build',vendors[url.pathname]));
