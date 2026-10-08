@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { simulateShot, sampleFrames, BALL_RADIUS, project, reboundPosition, validGesture, shotGuide, shotSpeed } from '../public/physics.js';
+import { simulateShot, sampleFrames, BALL_RADIUS, COURT_BOUNDS, courtPosition, project, reboundWorld, reboundPosition, validGesture, shotGuide, shotSpeed } from '../public/physics.js';
 import { cameraPose } from '../public/physics.js';
 import { PerspectiveCamera, Vector3 } from 'three';
 
@@ -62,7 +62,7 @@ test('equal-length deliberate flicks launch farther when faster', () => {
 });
 
 test('shots from nearby and sideways catch locations can reach the basket', () => {
-  for(const origin of [{x:1,z:2},{x:.1,z:0},{x:2,z:-1}]) {
+  for(const origin of [{x:1,z:2},{x:.1,z:0},{x:2,z:-.7}]) {
     let basket=false;
     for(let dy=.08;dy<.85;dy+=.005) {
       const shot=simulateShot({dx:0,dy,duration:.32},origin);
@@ -71,6 +71,48 @@ test('shots from nearby and sideways catch locations can reach the basket', () =
     }
     assert.ok(basket,'a suitable swipe can score from the catch location');
   }
+});
+
+test('near-rim shots forgive small power and aim errors while large errors still miss',()=>{
+  const guide=shotGuide();
+  assert.ok(guide.maxSpeed-guide.minSpeed>.3,'a usable scoring window rather than the former 0.14 m/s interval');
+  for(const speed of [8.75,8.9,9.03]) {
+    const dy=.35,gesture={dx:.008,dy,duration:.32,velocity:(speed-3.8-dy*7)/2.3};
+    assert.equal(simulateShot(gesture).made,true,`small error at ${speed} m/s still scores`);
+  }
+  assert.equal(simulateShot({dx:.15,dy:.35,duration:.32}).made,false);
+  assert.equal(simulateShot({dx:0,dy:.85,duration:.08}).made,false);
+});
+
+test('high and sideways shots stay on court, including every rebound sample',()=>{
+  const gestures=[{dx:.8,dy:.85,duration:.08},{dx:-.8,dy:.35,duration:.08},{dx:0,dy:.85,duration:.08}];
+  for(const origin of [{x:0,z:6},{x:3.8,z:7.5},{x:-3.8,z:-.75}])for(const gesture of gestures) {
+    const shot=simulateShot(gesture,origin);
+    for(const [,x,y,z] of [...shot.flight,...shot.frames]) {
+      assert.ok(Number.isFinite(x+y+z));
+      assert.ok(x>=COURT_BOUNDS.minX && x<=COURT_BOUNDS.maxX);
+      assert.ok(z>=COURT_BOUNDS.minZ && z<=COURT_BOUNDS.maxZ);
+      assert.ok(y>=BALL_RADIUS && y<=COURT_BOUNDS.maxY);
+    }
+  }
+});
+
+test('old escaped rebounds and catch positions remain playable with cameras inside the room',()=>{
+  const trajectory={frames:[[0,9,6.2,-3],[1,-10,.12,12]],duration:1000};
+  for(const elapsed of [0,500,1000]) {
+    const ball=reboundWorld(trajectory,elapsed),player=courtPosition(ball),pose=cameraPose(player);
+    assert.deepEqual(courtPosition(ball),player);
+    assert.ok(ball.x>=COURT_BOUNDS.minX && ball.x<=COURT_BOUNDS.maxX);
+    assert.ok(ball.z>=COURT_BOUNDS.minZ && ball.z<=COURT_BOUNDS.maxZ);
+    assert.ok(pose.eye.x>-5.8 && pose.eye.x<5.8 && pose.eye.z>-2 && pose.eye.z<11);
+    const held=project({...player,y:1.6},player);
+    assert.ok(held.depth>0 && held.x>0 && held.x<1 && held.y>0 && held.y<1,'the held ball is visible');
+    assert.equal(shotGuide(player).reachable,true,'the repaired catch location can shoot');
+  }
+  const player={x:0,z:6},pose=cameraPose(player),focus={x:pose.eye.x,y:6,z:pose.eye.z};
+  const overhead=project(focus,player,focus);
+  assert.ok(Number.isFinite(overhead.x+overhead.y+overhead.scale));
+  assert.deepEqual(courtPosition({x:Infinity,z:NaN}),{x:0,z:6});
 });
 
 test('range guide target scores in the real simulation and adapts to the catch position',()=>{

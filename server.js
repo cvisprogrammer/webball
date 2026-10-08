@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { reboundPosition, reboundWorld, reboundDuration, validGesture, simulateShot, START_POSITION } from './public/physics.js';
+import { reboundPosition, reboundWorld, reboundDuration, validGesture, simulateShot, START_POSITION, courtPosition } from './public/physics.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const token = () => randomBytes(24).toString('hex');
@@ -16,12 +16,18 @@ export async function createGameServer({ dataDir = path.join(root, '.data'), now
   let games = {};
   try { games = JSON.parse(await readFile(file, 'utf8')); }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
-  for(const game of Object.values(games)) game.positions ||= [{...START_POSITION},{...START_POSITION}];
+  let repaired = false;
+  for(const game of Object.values(games)) {
+    const positions = [0,1].map(seat => courtPosition(game.positions?.[seat]));
+    if(JSON.stringify(positions)!==JSON.stringify(game.positions)) repaired = true;
+    game.positions = positions;
+  }
   let queue = Promise.resolve();
   const save = async () => {
     await writeFile(`${file}.tmp`, JSON.stringify(games), { mode: 0o600 });
     await rename(`${file}.tmp`, file);
   };
+  if(repaired) await save();
   const view = (game, seat) => ({
     id: game.id, seat, players: game.players.map(p => p ? p.name : null),
     scores: game.scores, rebounds: game.rebounds, turn: game.turn, positions: game.positions,
@@ -120,7 +126,7 @@ export async function createGameServer({ dataDir = path.join(root, '.data'), now
       } else {
         if (req.method !== 'GET' && req.method !== 'HEAD') throw fail(405, 'Method not allowed');
         const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'],
-          '/physics.js': ['physics.js', 'text/javascript'], '/practice.js': ['practice.js', 'text/javascript'], '/swipe.js': ['swipe.js', 'text/javascript'], '/court3d.js': ['court3d.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'] };
+          '/physics.js': ['physics.js', 'text/javascript'], '/practice.js': ['practice.js', 'text/javascript'], '/swipe.js': ['swipe.js', 'text/javascript'], '/court3d.js': ['court3d.js', 'text/javascript'], '/light-court.js': ['light-court.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'] };
         const vendors = { '/vendor/three.module.js': 'three.module.js', '/vendor/three.core.js': 'three.core.js' };
         if(vendors[url.pathname]) {
           const content=await readFile(path.join(root,'node_modules/three/build',vendors[url.pathname]));

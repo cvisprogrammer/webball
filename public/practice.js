@@ -1,4 +1,4 @@
-import { START_POSITION, validGesture, simulateShot, reboundDuration, reboundPosition, reboundWorld } from './physics.js';
+import { START_POSITION, courtPosition, validGesture, simulateShot, reboundDuration, reboundPosition, reboundWorld } from './physics.js';
 
 export function createPractice() {
   return { solo:true, seat:0, players:['You',null], scores:[0,0], rebounds:[0,0],
@@ -6,6 +6,7 @@ export function createPractice() {
     trajectory:null, startedAt:null, version:0, attempts:0, baskets:0 };
 }
 export function practiceAction(game,body,now=Date.now()) {
+  game.positions[0] = courtPosition(game.positions[0]);
   if(body.action==='reset') {
     game.positions[0]={...START_POSITION};game.phase='shoot';game.trajectory=null;game.startedAt=null;
   } else if(body.action==='shoot' && game.phase==='shoot') {

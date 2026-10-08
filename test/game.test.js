@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createGameServer } from '../server.js';
-import { reboundPosition, reboundWorld } from '../public/physics.js';
+import { reboundPosition, reboundWorld, courtPosition } from '../public/physics.js';
 
 test('two players shoot, save an offline rebound, resume after restart and catch it', async () => {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'webball-test-'));
@@ -79,6 +79,19 @@ test('two players shoot, save an offline rebound, resume after restart and catch
     assert.equal(state.phase, 'shoot');
     assert.equal((await fetch(base + '/')).status, 200);
     assert.equal((await fetch(base + '/swipe.js')).status, 200);
+    assert.equal((await fetch(base + '/light-court.js')).status, 200);
+    // Reproduce a position saved by the old, escapable court boundaries.
+    await new Promise(resolve=>server.close(resolve));
+    const file=path.join(dataDir,'games.json'),saved=JSON.parse(await readFile(file,'utf8'));
+    const scores=[...state.scores],version=state.version;
+    saved[id].positions[1]={x:5.8,z:-2};
+    await writeFile(file,JSON.stringify(saved));
+    await start();
+    state=(await request(`/api/game?id=${id}`,null,p1)).data;
+    assert.deepEqual(state.positions[1],courtPosition({x:5.8,z:-2}));
+    assert.deepEqual(state.scores,scores);assert.equal(state.version,version);assert.equal(state.turn,1);
+    const repaired=JSON.parse(await readFile(file,'utf8'));
+    assert.deepEqual(repaired[id].positions[1],state.positions[1],'repair persists across refresh and restart');
   } finally {
     if (server?.listening) await new Promise(resolve => server.close(resolve));
     await rm(dataDir, { recursive: true, force: true });

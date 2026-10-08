@@ -3,16 +3,26 @@ export const BALL_RADIUS = .12;
 export const HOOP = { x: 0, y: 3.05, z: 0, radius: .23 };
 const clamp = (v, low, high) => Math.max(low, Math.min(high, v));
 export const START_POSITION = { x: 0, z: 6 };
+export const COURT_BOUNDS = { minX: -3.8, maxX: 3.8, minZ: -.75, maxZ: 7.5, maxY: 7.35 };
+export const SHOT_ASSIST_RADIUS = .38;
+export function courtPosition(position = START_POSITION) {
+  return { x: clamp(Number.isFinite(position?.x) ? position.x : START_POSITION.x, COURT_BOUNDS.minX, COURT_BOUNDS.maxX),
+    z: clamp(Number.isFinite(position?.z) ? position.z : START_POSITION.z, COURT_BOUNDS.minZ, COURT_BOUNDS.maxZ) };
+}
 export const MAX_SHOT_SPEED = 17;
 export const shotSpeed = gesture => clamp(3.8 + gesture.dy * 7 + (gesture.velocity ?? gesture.dy / Math.max(.08,gesture.duration)) * 2.3, 4.5, MAX_SHOT_SPEED);
 const launchAngle = distance => distance < .11 ? Math.PI/2 : Math.atan2(1.45+1.358*distance,distance);
 export function cameraPose(player = START_POSITION, focus = null) {
+  player = courtPosition(player);
   const distance = Math.hypot(player.x, player.z) || 1;
   const forward = { x: -player.x / distance, z: -player.z / distance };
   if(distance === 1 && player.x === 0 && player.z === 0) forward.z = -1;
-  const eye = { x: player.x - forward.x * .9, y: 1.75, z: player.z - forward.z * .9 };
+  const eye = { x: clamp(player.x - forward.x * .9, -4.7, 4.7), y: 1.75,
+    z: clamp(player.z - forward.z * .9, -1.85, 8.5) };
   const target = focus ? { x: focus.x, y: focus.y + .35, z: focus.z } :
     { x: eye.x + forward.x * 8, y: eye.y + .8, z: eye.z + forward.z * 8 };
+  // Looking straight up/down otherwise leaves the camera's right axis undefined.
+  if(Math.hypot(target.x-eye.x,target.z-eye.z)<.02){target.x+=forward.x*.02;target.z+=forward.z*.02;}
   return { eye, target };
 }
 // Same first-person camera matrices as Three.js, including head tracking during a bounce.
@@ -36,11 +46,17 @@ export function sampleFrames(frames, elapsed) {
   return { x: a[1] + (b[1] - a[1]) * f, y: a[2] + (b[2] - a[2]) * f, z: a[3] + (b[3] - a[3]) * f };
 }
 export function reboundWorld(trajectory, elapsed) {
-  if (trajectory.frames) return sampleFrames(trajectory.frames,elapsed);
+  let ball;
+  if (trajectory.frames) ball = sampleFrames(trajectory.frames,elapsed);
   // Keep rebounds already stored by the first release playable.
-  const t = clamp(elapsed / REBOUND_DURATION, 0, 1);
-  return { x: (trajectory.aim-.5)*6 + trajectory.direction*t*1.5,
-    y: BALL_RADIUS + Math.abs(Math.sin(t*Math.PI*3))*.8*(1-t), z: 2+4*t };
+  else {
+    const t = clamp(elapsed / REBOUND_DURATION, 0, 1);
+    ball = { x: (trajectory.aim-.5)*6 + trajectory.direction*t*1.5,
+      y: BALL_RADIUS + Math.abs(Math.sin(t*Math.PI*3))*.8*(1-t), z: 2+4*t };
+  }
+  // Older saved bounces may have escaped the former walls. Keep their replay
+  // and catch location safe without discarding the saved turn or trajectory.
+  return { ...courtPosition(ball), y: clamp(Number.isFinite(ball.y) ? ball.y : BALL_RADIUS, BALL_RADIUS, COURT_BOUNDS.maxY) };
 }
 export function reboundPosition(trajectory,elapsed,player=START_POSITION) {
   const ball=reboundWorld(trajectory,elapsed);return project(ball,player,ball);
@@ -51,6 +67,9 @@ export function validGesture(g) {
     (g.velocity === undefined || (Number.isFinite(g.velocity) && g.velocity >= 0 && g.velocity <= 100));
 }
 export function simulateShot(gesture, origin = START_POSITION) {
+  return simulate(gesture, courtPosition(origin), true);
+}
+function simulate(gesture, origin, savePath) {
   if (!validGesture(gesture)) throw new Error('Swipe upward from the ball to shoot');
   const speed = shotSpeed(gesture);
   const distance = Math.hypot(origin.x,origin.z);
@@ -62,13 +81,23 @@ export function simulateShot(gesture, origin = START_POSITION) {
   let vx=flat*(forward.x-side*forward.z), vz=flat*(forward.z+side*forward.x);
   let vy = speed * Math.sin(angle);
   let x = origin.x, y = 1.6, z = origin.z, made = false, contact = null, feedback = 'Air ball', shotLive = true;
-  const frames = [[0, x, y, z]], dt = 1 / 120;
+  const frames = savePath ? [[0, x, y, z]] : null, dt = 1 / 120;
   const impact = (time, kind) => { if (contact === null && !made) { contact = time; feedback = kind; } };
   for (let step = 1; step <= 1440; step++) {
     const time = step * dt, previousY = y, previousZ = z;
     vy -= 9.81 * dt;
     vx *= 1 - .025 * dt; vz *= 1 - .025 * dt;
     x += vx * dt; y += vy * dt; z += vz * dt;
+    // A small, local nudge helps near misses enter the unchanged rim. Large
+    // power or aim errors still miss; swipe velocity still launches the ball.
+    if (shotLive && contact === null && previousY > HOOP.y + .65 && y <= HOOP.y + .65 && vy < 0) {
+      const remaining = (vy + Math.sqrt(vy * vy + 2 * 9.81 * (y - HOOP.y))) / 9.81;
+      const landingX = x + vx * remaining, landingZ = z + vz * remaining;
+      if (remaining > .05 && Math.hypot(landingX, landingZ) <= SHOT_ASSIST_RADIUS) {
+        const entryTime = (vy + Math.sqrt(vy * vy + 2 * 9.81 * (y - HOOP.y - .05))) / 9.81;
+        vx = -x / entryTime; vz = -z / entryTime;
+      }
+    }
     // Plane backboard and a spherical ball, with energy lost on impact.
     if (Math.abs(x) < .91 && y > 2.55 && y < 3.85 && ((previousZ > -.33 && z <= -.33 && vz < 0) || (previousZ < -.57 && z >= -.57 && vz > 0))) {
       z = vz < 0 ? -.33 : -.57; vz = -vz * .68; vx *= .85; impact(time, 'Off the backboard');
@@ -96,29 +125,33 @@ export function simulateShot(gesture, origin = START_POSITION) {
       if (vy < 0) { impact(time, z > 2 ? 'Short of the hoop' : z < -.65 ? 'Long of the hoop' : 'Wide of the hoop'); vy = Math.abs(vy) > .5 ? -vy * .72 : 0; vx *= .82; vz *= .82; }
       vx *= .992; vz *= .992;
     }
-    if(y<6 && Math.abs(x)>5.8){x=Math.sign(x)*5.8;vx*= -.65;shotLive=false;impact(time,'Wide of the hoop');}
-    if(y<6 && z< -2){z=-2;vz=Math.abs(vz)*.65;shotLive=false;impact(time,'Long of the hoop');}
-    if(z>10.8){z=10.8;vz=-Math.abs(vz)*.65;shotLive=false;impact(time,'Long of the hoop');}
-    if(y>7.5){y=7.5;vy=-Math.abs(vy)*.5;shotLive=false;impact(time,'Too much power');}
-    if (step % 3 === 0) frames.push([time, x, y, z]);
+    if(x<COURT_BOUNDS.minX){x=COURT_BOUNDS.minX;vx=Math.abs(vx)*.65;shotLive=false;impact(time,'Wide of the hoop');}
+    if(x>COURT_BOUNDS.maxX){x=COURT_BOUNDS.maxX;vx=-Math.abs(vx)*.65;shotLive=false;impact(time,'Wide of the hoop');}
+    if(z<COURT_BOUNDS.minZ){z=COURT_BOUNDS.minZ;vz=Math.abs(vz)*.65;shotLive=false;impact(time,'Long of the hoop');}
+    if(z>COURT_BOUNDS.maxZ){z=COURT_BOUNDS.maxZ;vz=-Math.abs(vz)*.65;shotLive=false;impact(time,'Long of the hoop');}
+    if(y>COURT_BOUNDS.maxY){y=COURT_BOUNDS.maxY;vy=-Math.abs(vy)*.5;shotLive=false;impact(time,'Too much power');}
+    if (!savePath && (made || !shotLive)) return { made };
+    if (savePath && step % 3 === 0) frames.push([time, x, y, z]);
   }
+  if (!savePath) return { made };
   const split = contact === null ? 2 : contact;
   const start = sampleFrames(frames, split * 1000);
   const rebound = [[0, start.x, start.y, start.z], ...frames.filter(f => f[0] > split).map(f => [f[0] - split, ...f.slice(1)])];
   const flight = [...frames.filter(f => f[0] < split), [split, start.x, start.y, start.z]];
-  return { version: 3, frames: rebound, flight: made ? frames.filter(f => f[0] <= 3) : flight,
+  return { version: 4, frames: rebound, flight: made ? frames.filter(f => f[0] <= 3) : flight,
     duration: rebound.at(-1)[0] * 1000, flightDuration: made ? 3000 : split * 1000, made, feedback, gesture, origin: {x:origin.x,z:origin.z} };
 }
 
 const guideCache = new Map();
 export function shotGuide(origin = START_POSITION) {
+  origin = courtPosition(origin);
   const key=`${origin.x},${origin.z}`;
   if(guideCache.has(key))return guideCache.get(key);
   const distance=Math.hypot(origin.x,origin.z),angle=launchAngle(distance);
   const estimate=distance<.11 ? 6 : Math.sqrt(9.81*distance*distance/(2*Math.cos(angle)**2*(distance*Math.tan(angle)-1.45)));
   // Find a generous successful release interval in the actual simulation,
   // including its gravity, air drag, rim and backboard collisions.
-  const makes = speed => speed>=5 && speed<=15.8 && simulateShot({dx:0,dy:(speed-3.8)/(7+2.3/.32),duration:.32},origin).made;
+  const makes = speed => speed>=5 && speed<=15.8 && simulate({dx:0,dy:(speed-3.8)/(7+2.3/.32),duration:.32},origin,false).made;
   let best=null;
   function search(low,high,step) {
     let band=null;
@@ -129,8 +162,7 @@ export function shotGuide(origin = START_POSITION) {
       } else band=null;
     }
   }
-  search(estimate-.5,estimate+.5,.01);
-  if(!best)search(5,15.8,.03);
+  search(5,15.8,.025);
   if(best){const broad=best;best=null;search(broad.minSpeed,broad.maxSpeed,.002);best ||= broad;}
   if(best) {
     for(let i=0;i<5 && makes(best.minSpeed-.002);i++)best.minSpeed-=.002;

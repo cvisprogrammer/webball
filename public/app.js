@@ -1,14 +1,20 @@
-import { reboundPosition, reboundDuration, simulateShot, validGesture, sampleFrames, project, reboundWorld, START_POSITION, shotSpeed, shotGuide, MAX_SHOT_SPEED } from './physics.js';
+import { reboundPosition, reboundDuration, simulateShot, validGesture, sampleFrames, project, reboundWorld, START_POSITION, courtPosition, SHOT_ASSIST_RADIUS, shotSpeed, shotGuide, MAX_SHOT_SPEED } from './physics.js';
 import { createCourt, pointerPosition } from './court3d.js';
 import { createPractice, practiceAction } from './practice.js';
 import { createSwipe, moveSwipe, swipeGesture } from './swipe.js';
+import { createLightCourt } from './light-court.js';
 const $ = id => document.getElementById(id);
 const canvas = $('court');
-let drawCourt, graphicsReady = true;
-try { drawCourt = createCourt(canvas); }
-catch { graphicsReady = false; $('message').textContent = '3D rendering needs WebGL. Enable browser graphics acceleration and reload.'; drawCourt = () => {}; }
 let swipe = null;
-const playerPosition = () => game?.positions?.[game.seat] || START_POSITION;
+let drawCourt, drawLightCourt, lightView = false;
+function useLightView() {
+  swipe = null;
+  drawLightCourt ||= createLightCourt(canvas);
+  lightView = true; $('graphics-note').hidden = false;
+}
+try { drawCourt = createCourt(canvas,{ onContextLost: useLightView, onContextRestored: () => {lightView=false;drawLightCourt?.hide();$('graphics-note').hidden=true;} }); }
+catch { useLightView(); }
+const playerPosition = () => courtPosition(game?.positions?.[game.seat] || START_POSITION);
 const params = new URLSearchParams(location.hash.slice(1));
 let id = params.get('game') || localStorage.getItem('webball-game');
 let practice = createPractice(), game = practice, busy = false, playback = null, shot = null;
@@ -24,7 +30,6 @@ async function api(route, body) {
   return result;
 }
 function render() {
-  if(!graphicsReady)message('3D rendering needs WebGL. Enable browser graphics acceleration and reload.');
   $('game').hidden = false;
   if(!game.solo)$('lobby').hidden = true;
   $('mode-label').textContent = game.solo ? 'SOLO SHOOTAROUND' : 'TWO PLAYER GAME';
@@ -165,9 +170,11 @@ function updateRangeGuide(time=performance.now()) {
   const gesture=swipe ? swipeGesture(swipe,time) : null;
   const speed=gesture && gesture.dy>0 ? shotSpeed(gesture) : 0;
   const distance=Math.hypot(player.x,player.z);
-  const aimed=gesture && Math.abs(gesture.dx/Math.max(.001,gesture.dy))*distance<.08;
+  const aimed=gesture && Math.abs(gesture.dx/Math.max(.001,gesture.dy))*distance<SHOT_ASSIST_RADIUS*.6;
   const aligned=gesture && gesture.velocity>=.05 && validGesture(gesture) && aimed && guide.reachable && speed>=guide.minSpeed && speed<=guide.maxSpeed;
   display.style.setProperty('--target-level',`${guide.speed/MAX_SHOT_SPEED*100}%`);
+  display.style.setProperty('--zone-bottom',`${guide.minSpeed/MAX_SHOT_SPEED*100}%`);
+  display.style.setProperty('--zone-height',`${(guide.maxSpeed-guide.minSpeed)/MAX_SHOT_SPEED*100}%`);
   display.style.setProperty('--power-level',`${speed/MAX_SHOT_SPEED*100}%`);
   display.classList.toggle('aligned',!!aligned);
   $('range-distance').textContent=`${distance.toFixed(1)} m`;
@@ -195,7 +202,12 @@ function draw() {
     if(playback && elapsed>reboundDuration(playback.trajectory)){playback=null;message('It got away! Replay the saved rebound.');render();}
   }
   updateRangeGuide();
-  drawCourt({position,player,focus,time:performance.now(),ready:canShoot(),moving:Boolean(shot||playback)});
+  const state={position,player,focus,time:performance.now(),ready:canShoot(),moving:Boolean(shot||playback)};
+  if(lightView)drawLightCourt(state);
+  else {
+    try { drawCourt(state); }
+    catch { useLightView();drawLightCourt(state); }
+  }
   requestAnimationFrame(draw);
 }
 draw();
