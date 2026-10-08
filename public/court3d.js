@@ -1,68 +1,91 @@
-import { project, BALL_RADIUS } from './physics.js';
-const W = 700, H = 650;
-export function pointerPosition(canvas, event) {
-  const r = canvas.getBoundingClientRect(), scale = Math.min(r.width / W, r.height / H);
-  return { x: (event.clientX - r.left - (r.width - W * scale) / 2) / (W * scale),
-    y: (event.clientY - r.top - (r.height - H * scale) / 2) / (H * scale) };
+import * as THREE from '/vendor/three.module.js';
+import { cameraPose, BALL_RADIUS, START_POSITION } from './physics.js';
+const W=700,H=650;
+export function pointerPosition(canvas,event) {
+  const r=canvas.getBoundingClientRect(),scale=Math.min(r.width/W,r.height/H);
+  return {x:(event.clientX-r.left-(r.width-W*scale)/2)/(W*scale),y:(event.clientY-r.top-(r.height-H*scale)/2)/(H*scale)};
 }
 export function createCourt(canvas) {
-  const ctx = canvas.getContext('2d');
-  function line(points, color = '#f0e2c0aa', width = 2, close = false) {
-    ctx.beginPath(); points.forEach((p, i) => {const s = project(p);ctx[i ? 'lineTo' : 'moveTo'](s.x * W, s.y * H);});
-    if(close)ctx.closePath();ctx.strokeStyle=color;ctx.lineWidth=width;ctx.stroke();
+  const renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:false});
+  renderer.setSize(W,H,false);renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));
+  renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+  renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.2;
+  canvas.dataset.renderer='webgl';
+  const scene=new THREE.Scene();scene.background=new THREE.Color('#25343b');scene.fog=new THREE.Fog('#25343b',14,30);
+  const camera=new THREE.PerspectiveCamera(60,W/H,.04,50);
+  scene.add(new THREE.HemisphereLight('#dce9f0','#75623e',2));
+  const sun=new THREE.DirectionalLight('#fff3d7',3.5);sun.position.set(-3,8,4);sun.castShadow=true;
+  sun.shadow.mapSize.set(innerWidth<600?512:1024,innerWidth<600?512:1024);Object.assign(sun.shadow.camera,{left:-7,right:7,top:9,bottom:-9,near:1,far:22});sun.shadow.normalBias=.015;sun.shadow.bias=-.0003;scene.add(sun);
+  const fill=new THREE.PointLight('#b6e1d5',35,18);fill.position.set(4,5,-1);scene.add(fill);
+  const mat=(color,extra={})=>new THREE.MeshStandardMaterial({color,roughness:.65,...extra});
+  function mesh(geometry,material,x=0,y=0,z=0,shadow=true) {
+    const object=new THREE.Mesh(geometry,material);object.position.set(x,y,z);object.castShadow=shadow;object.receiveShadow=true;scene.add(object);return object;
   }
-  function polygon(points, color) {
-    ctx.beginPath();points.forEach((p,i)=>{const s=project(p);ctx[i?'lineTo':'moveTo'](s.x*W,s.y*H);});ctx.closePath();ctx.fillStyle=color;ctx.fill();
+  function box(w,h,d,color,x,y,z,extra={}) {return mesh(new THREE.BoxGeometry(w,h,d),mat(color,extra),x,y,z)}
+  function tube(points,radius,material) {
+    const curve=new THREE.CurvePath();
+    for(let i=1;i<points.length;i++)curve.add(new THREE.LineCurve3(new THREE.Vector3(...points[i-1]),new THREE.Vector3(...points[i])));
+    return mesh(new THREE.TubeGeometry(curve,Math.max(8,points.length*3),radius,6,false),material);
   }
-  function ring(cx, y, cz, radius, color, width = 2, start = 0, end = Math.PI * 2) {
-    const points=[];for(let i=0;i<=64;i++){const a=start+(end-start)*i/64;points.push({x:cx+Math.cos(a)*radius,y,z:cz+Math.sin(a)*radius});}line(points,color,width);
+  function arc(x,z,r,start=0,end=Math.PI*2,color='#f4e8ce') {
+    const points=[];for(let i=0;i<=72;i++){const a=start+(end-start)*i/72;points.push([x+Math.cos(a)*r,.016,z+Math.sin(a)*r]);}
+    tube(points,.013,mat(color));
   }
-  function shadow(p) {
-    const s=project({x:p.x,y:.012,z:p.z}), radius=BALL_RADIUS*s.scale*(1+p.y*.25);
-    ctx.save();ctx.translate(s.x*W,s.y*H);ctx.scale(1,.32);ctx.fillStyle=`rgba(0,0,0,${.32/(1+p.y*.4)})`;ctx.filter='blur(4px)';ctx.beginPath();ctx.arc(0,0,radius,0,Math.PI*2);ctx.fill();ctx.restore();
+  // Deterministic wooden parquet texture generated locally; no external image requests.
+  const wood=document.createElement('canvas');wood.width=1024;wood.height=1024;const wc=wood.getContext('2d');
+  for(let i=0;i<24;i++) {
+    wc.fillStyle=['#b87d46','#c99861','#bb874f','#cca16d'][i%4];wc.fillRect(i*44,0,43,1024);
+    for(let j=0;j<32;j++){wc.strokeStyle=j%3?'#643b1320':'#fce1b52a';wc.lineWidth=.5;wc.beginPath();wc.moveTo(i*44+3+j%37,0);wc.bezierCurveTo(i*44+6+j%35,330,i*44+j%40,690,i*44+4+j%38,1024);wc.stroke();}
+    for(let z=(i%3)*125;z<1024;z+=375){wc.fillStyle='#6b452a55';wc.fillRect(i*44,z,44,1);}
   }
-  function ball(p, time, screen) {
-    const s=screen || project(p), radius=screen ? 15 : Math.max(6,BALL_RADIUS*s.scale);
-    const x=s.x*W,y=s.y*H;
-    ctx.save();ctx.translate(x,y);
-    const gradient=ctx.createRadialGradient(-radius*.38,-radius*.4,radius*.05,radius*.25,radius*.25,radius*1.2);
-    gradient.addColorStop(0,'#ffcb7a');gradient.addColorStop(.4,'#ed8a38');gradient.addColorStop(.8,'#bc4d19');gradient.addColorStop(1,'#562819');
-    ctx.fillStyle=gradient;ctx.beginPath();ctx.arc(0,0,radius,0,Math.PI*2);ctx.fill();ctx.clip();
-    ctx.rotate(time*.0012+p.z*.35);ctx.strokeStyle='#482411';ctx.lineWidth=Math.max(1,radius*.07);
-    ctx.beginPath();ctx.moveTo(-radius,0);ctx.lineTo(radius,0);ctx.moveTo(0,-radius);ctx.lineTo(0,radius);ctx.stroke();
-    for(const side of [-1,1]){ctx.beginPath();ctx.ellipse(side*radius,0,radius*.8,radius*1.05,0,0,Math.PI*2);ctx.stroke();}
-    // Pebbled leather surface, deterministic so the ball doesn't flicker.
-    ctx.fillStyle='#4c250e30';for(let i=0;i<90;i++){const angle=i*2.39996,r=Math.sqrt(i/90)*radius;ctx.beginPath();ctx.arc(Math.cos(angle)*r,Math.sin(angle)*r,.5,0,Math.PI*2);ctx.fill();}ctx.restore();
+  const woodTexture=new THREE.CanvasTexture(wood);woodTexture.colorSpace=THREE.SRGBColorSpace;woodTexture.wrapS=woodTexture.wrapT=THREE.RepeatWrapping;woodTexture.repeat.set(2,2.5);woodTexture.anisotropy=renderer.capabilities.getMaxAnisotropy();
+  const floor=mesh(new THREE.PlaneGeometry(12,16),mat('#ffffff',{map:woodTexture,roughness:.4,metalness:.04}),0,0,3,false);floor.rotation.x=-Math.PI/2;
+  const paint=mesh(new THREE.PlaneGeometry(2.44,4.2),mat('#244d42',{roughness:.72}),0,.008,.9,false);paint.rotation.x=-Math.PI/2;
+  const boundary=[[-3.8,.02,-1.2],[3.8,.02,-1.2],[3.8,.02,7.5],[-3.8,.02,7.5],[-3.8,.02,-1.2]];
+  tube(boundary,.014,mat('#f1e7d0'));
+  tube([[-1.22,.02,-1.2],[-1.22,.02,3],[1.22,.02,3],[1.22,.02,-1.2]],.014,mat('#f1e7d0'));
+  arc(0,3,1.22,0,Math.PI);arc(0,0,4.1,0,Math.PI);arc(0,0,.6,0,Math.PI);
+  const wall=mat('#3a4848',{roughness:.95});
+  mesh(new THREE.BoxGeometry(12,6,.25),wall,0,3,-2.2);mesh(new THREE.BoxGeometry(.25,6,16),wall,-6,3,3);mesh(new THREE.BoxGeometry(.25,6,16),wall,6,3,3);
+  mesh(new THREE.BoxGeometry(12,.15,16),wall,0,7.6,3,false);
+  for(let row=0;row<9;row++)box(11.6,.008,.012,'#1d3030',0,1.1+row*.5,-2.063);
+  for(const side of[-1,1])for(let row=0;row<3;row++) {
+    box(1,.2,9,'#394d44',side*(4.8+row*.35),.4+row*.4,3.3);
+    for(let seat=0;seat<8;seat++)box(.35,.18,.6,'#6b7963',side*(4.8+row*.35),.6+row*.4,-.3+seat*1.05);
   }
-  function basket(time) {
-    polygon([{x:-.12,y:0,z:-.85},{x:.12,y:0,z:-.85},{x:.12,y:4,z:-.85},{x:-.12,y:4,z:-.85}],'#64716a');
-    polygon([{x:-.92,y:2.55,z:-.45},{x:.92,y:2.55,z:-.45},{x:.92,y:3.85,z:-.45},{x:-.92,y:3.85,z:-.45}],'#cddedc33');
-    line([{x:-.92,y:2.55,z:-.45},{x:.92,y:2.55,z:-.45},{x:.92,y:3.85,z:-.45},{x:-.92,y:3.85,z:-.45}],'#ccdcdbaa',3,true);
-    line([{x:-.3,y:2.98,z:-.44},{x:.3,y:2.98,z:-.44},{x:.3,y:3.5,z:-.44},{x:-.3,y:3.5,z:-.44}],'#f0e8d4bb',2,true);
-    line([{x:0,y:3.05,z:-.45},{x:0,y:3.05,z:-.23}],'#e77535',4);
-    for(let i=0;i<14;i++){const a=i/14*Math.PI*2,b=a+.35;
-      line([{x:Math.cos(a)*.23,y:3.03,z:Math.sin(a)*.23},{x:Math.cos(b)*.13,y:2.63,z:Math.sin(b)*.13}],'#f0f1dc88',1);
-      line([{x:Math.cos(a)*.23,y:3.03,z:Math.sin(a)*.23},{x:Math.cos(a-.35)*.13,y:2.63,z:Math.sin(a-.35)*.13}],'#f0f1dc66',1);
-    }
-    ring(0,2.82,0,.18,'#f0f1dc66',1);ring(0,3.05,0,.23,'#ff8e44',4);
+  for(const x of[-3.5,3.5]){box(1.3,.05,.12,'#eeeccc',x,5,-1.7,{emissive:'#faf4ca',emissiveIntensity:2});}
+  box(.14,3.8,.14,'#5f6c6b',0,1.9,-.9);box(.14,.14,.55,'#5f6c6b',0,3.05,-.7);
+  box(1.84,1.3,.04,'#d7e7e8',0,3.2,-.45,{transparent:true,opacity:.27,roughness:.16,metalness:.06,depthWrite:false});
+  const boardLine=mat('#f4f3e8');
+  tube([[-.92,2.55,-.42],[.92,2.55,-.42],[.92,3.85,-.42],[-.92,3.85,-.42],[-.92,2.55,-.42]],.015,boardLine);
+  tube([[-.3,2.98,-.418],[.3,2.98,-.418],[.3,3.5,-.418],[-.3,3.5,-.418],[-.3,2.98,-.418]],.012,boardLine);
+  box(.13,.045,.22,'#da6b2a',0,3.05,-.34);
+  const rim=mesh(new THREE.TorusGeometry(.23,.018,12,64),mat('#eb7028',{metalness:.6,roughness:.3}),0,3.05,0);rim.rotation.x=Math.PI/2;
+  const net=new THREE.Group();scene.add(net);const netMaterial=mat('#e5e2d3',{roughness:1});
+  for(let i=0;i<16;i++)for(const direction of[-1,1]) {
+    const a=i/16*Math.PI*2,points=[];for(let j=0;j<=5;j++){const t=j/5,r=.23-.1*t,angle=a+direction*.45*t;points.push([Math.cos(angle)*r,3.03-.42*t,Math.sin(angle)*r]);}
+    const lace=tube(points,.0035,netMaterial);scene.remove(lace);net.add(lace);
   }
-  return function draw({position={x:0,y:1.6,z:6},time=0,trail=null,ready=false,legacy=null}={}) {
-    const sky=ctx.createLinearGradient(0,0,0,H);sky.addColorStop(0,'#101d24');sky.addColorStop(.65,'#31423b');sky.addColorStop(1,'#29372e');ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
-    // World-space stadium walls and wooden court, projected with the same camera as the ball.
-    polygon([{x:-5,y:0,z:-2},{x:5,y:0,z:-2},{x:5,y:5,z:-2},{x:-5,y:5,z:-2}],'#1d302e');
-    for(let i=-4;i<=4;i++){polygon([{x:i-.4,y:.2,z:-1.95},{x:i+.3,y:.2,z:-1.95},{x:i+.3,y:1.1,z:-1.95},{x:i-.4,y:1.1,z:-1.95}],i%2?'#2c403a':'#263a34');}
-    for(const x of [-3.5,3.5]){const light=project({x,y:4.5,z:-1.8});ctx.save();ctx.shadowColor='#e0e9b3';ctx.shadowBlur=22;ctx.fillStyle='#e9efc9';ctx.fillRect(light.x*W-20,light.y*H,40,3);ctx.restore();}
-    polygon([{x:-4.5,y:0,z:-2},{x:4.5,y:0,z:-2},{x:4.5,y:0,z:8},{x:-4.5,y:0,z:8}],'#a57448');
-    for(let i=0;i<30;i++){const x=-4.5+i*.3;polygon([{x,y:.001,z:-2},{x:x+.295,y:.001,z:-2},{x:x+.295,y:.001,z:8},{x,y:.001,z:8}],['#ae7d50','#b78352','#aa7649','#ba8757'][i%4]);
-      for(let z=-2+(i%3);z<8;z+=3)line([{x,y:.003,z},{x:x+.3,y:.003,z}],'#593c2725',.6);
-    }
-    polygon([{x:-1.22,y:.005,z:-1.2},{x:1.22,y:.005,z:-1.2},{x:1.22,y:.005,z:3},{x:-1.22,y:.005,z:3}],'#294e45c9');
-    line([{x:-3.8,y:.01,z:-1.2},{x:3.8,y:.01,z:-1.2},{x:3.8,y:.01,z:7.5},{x:-3.8,y:.01,z:7.5}],'#f2e3c5bb',2,true);
-    line([{x:-1.22,y:.01,z:-1.2},{x:-1.22,y:.01,z:3},{x:1.22,y:.01,z:3},{x:1.22,y:.01,z:-1.2}]);
-    ring(0,.01,3,1.22,'#f2e3c5bb',2,0,Math.PI);ring(0,.01,0,4.1,'#f2e3c5bb',2,0,Math.PI);
-    ring(0,.01,0,.6,'#f2e3c588',1,0,Math.PI);shadow(position);
-    if(position.z<-.45)ball(position,time,legacy);basket(time);if(position.z>=-.45)ball(position,time,legacy);
-    if(ready){const s=project(position),r=BALL_RADIUS*s.scale+8;ctx.strokeStyle='#d3f77599';ctx.setLineDash([3,5]);ctx.lineWidth=1;ctx.beginPath();ctx.arc(s.x*W,s.y*H,r,0,Math.PI*2);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#edf4d0bb';ctx.font='11px sans-serif';ctx.textAlign='center';ctx.fillText('SWIPE FROM THE BALL',s.x*W,Math.min(H-35,s.y*H+r+23));}
-    if(trail){ctx.strokeStyle='#d3f775';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(trail.from.x*W,trail.from.y*H);ctx.lineTo(trail.to.x*W,trail.to.y*H);ctx.stroke();}
+  // Equirectangular leather texture with seams and pebbled bump detail.
+  const leather=document.createElement('canvas');leather.width=1024;leather.height=512;const lc=leather.getContext('2d');lc.fillStyle='#d77624';lc.fillRect(0,0,1024,512);
+  let seed=41;for(let i=0;i<26000;i++){seed=(seed*1664525+1013904223)>>>0;const x=seed%1024;seed=(seed*1664525+1013904223)>>>0;const y=seed%512;lc.fillStyle=i%2?'#71390840':'#ffb26160';lc.fillRect(x,y,1.5,1.5);}
+  lc.strokeStyle='#38200c';lc.lineWidth=7;for(let i=0;i<4;i++){lc.beginPath();lc.moveTo(i*256,0);lc.lineTo(i*256,512);lc.stroke();}lc.beginPath();lc.moveTo(0,256);lc.lineTo(1024,256);lc.stroke();
+  for(let side=0;side<2;side++){lc.beginPath();for(let i=0;i<=128;i++){const x=i*8,y=256+Math.sin(i/128*Math.PI*2+side*Math.PI)*180;lc[i?'lineTo':'moveTo'](x,y);}lc.stroke();}
+  const leatherTexture=new THREE.CanvasTexture(leather);leatherTexture.colorSpace=THREE.SRGBColorSpace;
+  const basketball=mesh(new THREE.SphereGeometry(BALL_RADIUS,48,32),mat('#ffffff',{map:leatherTexture,bumpMap:leatherTexture,bumpScale:.0008,roughness:.86}),0,1.6,6);
+  const halo=mesh(new THREE.TorusGeometry(.15,.002,6,48),new THREE.MeshBasicMaterial({color:'#d3f775',transparent:true,opacity:.7,depthTest:false}),0,1.6,6,false);
+  const hint=document.getElementById('court-hint');
+  let previousFrame=null,renderWidth=W;
+  return function draw({position={x:0,y:1.6,z:6},player=START_POSITION,focus=null,time=0,ready=false,moving=false}={}) {
+    const bounds=canvas.getBoundingClientRect();
+    const width=Math.round(Math.min(bounds.width||W,(bounds.height||H)*W/H,W));
+    if(width!==renderWidth){renderWidth=width;renderer.setSize(width,width*H/W,false);}
+    const frame=JSON.stringify([position,player,focus,ready,renderWidth,moving?time:0]);
+    if(frame===previousFrame)return;previousFrame=frame;
+    const pose=cameraPose(player,focus);camera.position.set(pose.eye.x,pose.eye.y,pose.eye.z);camera.lookAt(pose.target.x,pose.target.y,pose.target.z);
+    basketball.position.set(position.x,position.y,position.z);basketball.rotation.set(position.z*.6,moving?time*.0008:0,position.x*.4);
+    halo.visible=ready;halo.position.copy(basketball.position);halo.quaternion.copy(camera.quaternion);
+    if(hint)hint.hidden=!ready;
+    canvas.dataset.eye=JSON.stringify(pose.eye);renderer.render(scene,camera);
   };
 }

@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { reboundPosition, reboundDuration, validGesture, simulateShot } from './public/physics.js';
+import { reboundPosition, reboundWorld, reboundDuration, validGesture, simulateShot, START_POSITION } from './public/physics.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const token = () => randomBytes(24).toString('hex');
@@ -16,6 +16,7 @@ export async function createGameServer({ dataDir = path.join(root, '.data'), now
   let games = {};
   try { games = JSON.parse(await readFile(file, 'utf8')); }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
+  for(const game of Object.values(games)) game.positions ||= [{...START_POSITION},{...START_POSITION}];
   let queue = Promise.resolve();
   const save = async () => {
     await writeFile(`${file}.tmp`, JSON.stringify(games), { mode: 0o600 });
@@ -23,7 +24,7 @@ export async function createGameServer({ dataDir = path.join(root, '.data'), now
   };
   const view = (game, seat) => ({
     id: game.id, seat, players: game.players.map(p => p ? p.name : null),
-    scores: game.scores, rebounds: game.rebounds, turn: game.turn,
+    scores: game.scores, rebounds: game.rebounds, turn: game.turn, positions: game.positions,
     phase: game.phase, trajectory: game.trajectory, startedAt: game.startedAt,
     serverTime: now(), version: game.version,
     invite: seat === 0 && !game.players[1] ? game.invite : undefined,
@@ -48,7 +49,7 @@ export async function createGameServer({ dataDir = path.join(root, '.data'), now
     if (req.method === 'POST' && url.pathname === '/api/create') {
       const key = token();
       const game = { id: token().slice(0, 12), invite: token(), players: [{ name: name(), key }, null],
-        scores: [0, 0], rebounds: [0, 0], turn: 0, phase: 'waiting', trajectory: null, startedAt: null, version: 0 };
+        scores: [0, 0], rebounds: [0, 0], positions: [{...START_POSITION},{...START_POSITION}], turn: 0, phase: 'waiting', trajectory: null, startedAt: null, version: 0 };
       games[game.id] = game;
       await save();
       res.setHeader('Set-Cookie', seatCookie(key, req));
@@ -78,7 +79,7 @@ export async function createGameServer({ dataDir = path.join(root, '.data'), now
         if (game.turn !== seat) throw fail(409, 'It is the other player’s turn');
         if (body.action === 'shoot' && game.phase === 'shoot') {
           if (!validGesture(body.gesture)) throw fail(400, 'Swipe upward from the ball to shoot');
-          const trajectory = simulateShot(body.gesture);
+          const trajectory = simulateShot(body.gesture, game.positions[seat]);
           if (trajectory.made) { game.scores[seat] += 2; game.turn = 1 - seat; }
           else {
             game.trajectory = trajectory;
@@ -91,8 +92,10 @@ export async function createGameServer({ dataDir = path.join(root, '.data'), now
           const elapsed = now() - game.startedAt;
           if (!Number.isFinite(body.x) || !Number.isFinite(body.y) || elapsed < 0 || elapsed > reboundDuration(game.trajectory))
             throw fail(409, 'The ball got away. Replay the rebound.');
-          const ball = reboundPosition(game.trajectory, elapsed);
+          const ball = reboundPosition(game.trajectory, elapsed, game.positions[seat]);
           if (Math.hypot(body.x - ball.x, body.y - ball.y) > .06) throw fail(400, 'Tap closer to the ball');
+          const caught = reboundWorld(game.trajectory, elapsed);
+          game.positions[seat] = {x: caught.x, z: caught.z};
           game.rebounds[seat]++; game.phase = 'shoot'; game.trajectory = null; game.startedAt = null;
         } else throw fail(409, 'That action is unavailable');
         game.version++; await save(); result = view(game, seat);
@@ -117,7 +120,13 @@ export async function createGameServer({ dataDir = path.join(root, '.data'), now
       } else {
         if (req.method !== 'GET' && req.method !== 'HEAD') throw fail(405, 'Method not allowed');
         const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'],
-          '/physics.js': ['physics.js', 'text/javascript'], '/court3d.js': ['court3d.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'] };
+          '/physics.js': ['physics.js', 'text/javascript'], '/gestures.js': ['gestures.js', 'text/javascript'], '/court3d.js': ['court3d.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'] };
+        const vendors = { '/vendor/three.module.js': 'three.module.js', '/vendor/three.core.js': 'three.core.js' };
+        if(vendors[url.pathname]) {
+          const content=await readFile(path.join(root,'node_modules/three/build',vendors[url.pathname]));
+          res.writeHead(200,{'Content-Type':'text/javascript','X-Content-Type-Options':'nosniff'});
+          res.end(req.method === 'HEAD' ? undefined : content);return;
+        }
         const entry = files[url.pathname];
         if (!entry) throw fail(404, 'Not found');
         const content = await readFile(path.join(root, 'public', entry[0]));

@@ -1,8 +1,13 @@
-import { reboundPosition, reboundDuration, simulateShot, validGesture, sampleFrames, project } from './physics.js';
+import { reboundPosition, reboundDuration, simulateShot, validGesture, sampleFrames, project, reboundWorld, START_POSITION } from './physics.js';
 import { createCourt, pointerPosition } from './court3d.js';
+import { wheelGesture } from './gestures.js';
 const $ = id => document.getElementById(id);
-const canvas = $('court'), drawCourt = createCourt(canvas);
-let swipe = null, keyboardCharge = null, keyboardAim = 0;
+const canvas = $('court');
+let drawCourt, graphicsReady = true;
+try { drawCourt = createCourt(canvas); }
+catch { graphicsReady = false; $('message').textContent = '3D rendering needs WebGL. Enable browser graphics acceleration and reload.'; drawCourt = () => {}; }
+let swipe = null, keyboardCharge = null, keyboardAim = 0, wheelSamples = [], wheelTimer = null, wheelDeadline = null, wheelCooldown = 0;
+const playerPosition = () => game?.positions?.[game.seat] || START_POSITION;
 const params = new URLSearchParams(location.hash.slice(1));
 let id = params.get('game') || localStorage.getItem('webball-game');
 let game = null, busy = false, playback = null, shot = null;
@@ -17,12 +22,14 @@ async function api(route, body) {
   return result;
 }
 function render() {
+  if(!graphicsReady)message('3D rendering needs WebGL. Enable browser graphics acceleration and reload.');
   $('lobby').hidden = true; $('game').hidden = false;
   for (let i = 0; i < 2; i++) {
     $(`p${i}`).textContent = (game.players[i] || 'Waiting for player') + (game.seat === i ? ' · YOU' : '');
     $(`s${i}`).textContent = game.scores[i]; $(`r${i}`).textContent = `${game.rebounds[i]} ${game.rebounds[i] === 1 ? 'rebound' : 'rebounds'}`;
   }
   const yours = game.turn === game.seat;
+  $('shot-location').textContent = `${Math.hypot(playerPosition().x,playerPosition().z).toFixed(1)} m from the hoop · your rebound sets your next shot`;
   $('turn-label').textContent = game.phase === 'waiting' ? 'INVITE YOUR TEAMMATE' : yours ? 'YOUR TURN' : 'SAVED · WAITING FOR PLAYER';
   $('invite-row').hidden = !game.invite;
   if (game.invite) $('invite').value = `${location.origin}/#game=${game.id}&invite=${game.invite}`;
@@ -34,8 +41,8 @@ function render() {
     game.phase === 'rebound' ? (yours ? playback ? 'Get that rebound!' : 'A rebound is waiting for you.' : 'Your miss is saved.') :
     yours ? 'Make it count.' : `${game.players[game.turn]} is up next.`;
   $('instruction').textContent = game.phase === 'waiting' ? 'Share the link below. You’ll take the first shot when they join.' :
-    game.phase === 'rebound' ? (yours ? 'The saved bounce starts when you’re ready. Catch it to earn your next shot.' : 'The other player can catch this bounce whenever they return.') :
-    yours ? 'Swipe upward from the ball. Direction sets your aim; length and speed set your power. A basket is worth two points.' : 'You can leave and come back. This game stays right here.';
+    game.phase === 'rebound' ? (yours ? 'The saved bounce starts when you’re ready. Catch it to shoot from that spot.' : 'The other player can catch this bounce whenever they return.') :
+    yours ? 'Shoot from where you caught it. Swipe upward on the ball, or swipe on your trackpad over the court. Faster swipes travel farther.' : 'You can leave and come back. This game stays right here.';
 }
 async function refresh() {
   if (!id || busy || shot || playback) return;
@@ -69,8 +76,9 @@ $('copy').onclick = async () => {
 async function takeShot(gesture) {
   if (busy || shot || !game || game.phase !== 'shoot' || game.turn !== game.seat) return;
   if (!validGesture(gesture)) { message('Start on the ball and swipe upward. Try a smooth, medium-length flick.'); return; }
-  const trajectory = simulateShot(gesture);
-  shot = { trajectory, start: performance.now() };
+  const trajectory = simulateShot(gesture, playerPosition());
+  shot = { trajectory, start: performance.now(), player: {...playerPosition()} };
+keyboardAim = 0;
   const result = await action({ action: 'shoot', gesture });
   if (!result) shot = null;
   $('shot-feedback').textContent = 'Shot released';
@@ -82,17 +90,18 @@ $('start-rebound').onclick = async () => {
 async function catchBall(x, y) {
   if (!playback || busy) return;
   const result = await action({ action: 'catch', x, y });
-  if (result) { playback = null; message('Rebound caught. Your shot!'); render(); }
+  if (result) { playback = null; message('Rebound caught. Shoot from this spot!'); render(); }
 }
 function canShoot() { return game && game.phase === 'shoot' && game.turn === game.seat && !busy && !shot; }
 canvas.addEventListener('pointerdown', event => {
   if (event.button !== 0) return;
   const point = pointerPosition(canvas, event);
   if (playback) { catchBall(point.x, point.y); return; }
-  const ball = project({ x: 0, y: 1.6, z: 6 });
+  const player=playerPosition();
+  const ball = project({ x: player.x, y: 1.6, z: player.z },player);
   if (!canShoot() || Math.hypot(point.x - ball.x, point.y - ball.y) > .1) return;
   event.preventDefault(); canvas.setPointerCapture(event.pointerId);
-  swipe = { from: point, to: point, start: performance.now(), pointer: event.pointerId };
+  swipe = { from: point, to: point, start: event.timeStamp, pointer: event.pointerId };
   message(''); canvas.focus();
 });
 canvas.addEventListener('pointermove', event => {
@@ -103,14 +112,14 @@ canvas.addEventListener('pointermove', event => {
 canvas.addEventListener('pointerup', event => {
   if (!swipe || swipe.pointer !== event.pointerId) return;
   const end = pointerPosition(canvas, event), gesture = { dx: end.x - swipe.from.x,
-    dy: swipe.from.y - end.y, duration: Math.max(.08, (performance.now() - swipe.start) / 1000) };
+    dy: swipe.from.y - end.y, duration: Math.max(.08, (event.timeStamp - swipe.start) / 1000) };
   swipe = null; canvas.releasePointerCapture(event.pointerId); takeShot(gesture);
 });
 canvas.addEventListener('pointercancel', () => { swipe = null; $('power').value = 0; });
 canvas.addEventListener('keydown', event => {
   if (['Space','ArrowLeft','ArrowRight'].includes(event.code)) event.preventDefault();
   if (event.code === 'Space' && playback) {
-    const ball = reboundPosition(playback.trajectory, performance.now() - playback.start); catchBall(ball.x, ball.y);
+    const ball = reboundPosition(playback.trajectory, performance.now() - playback.start, playerPosition()); catchBall(ball.x, ball.y);
   } else if (canShoot()) {
     if(event.code === 'ArrowLeft') keyboardAim = Math.max(-.2, keyboardAim - .015);
     if(event.code === 'ArrowRight') keyboardAim = Math.min(.2, keyboardAim + .015);
@@ -125,24 +134,42 @@ canvas.addEventListener('keyup', event => {
   }
 });
 canvas.addEventListener('blur', () => { keyboardCharge = null; swipe = null; });
+function finishWheel() {
+  clearTimeout(wheelTimer); clearTimeout(wheelDeadline);
+  if(!wheelSamples.length)return;
+  const r=canvas.getBoundingClientRect(),height=Math.min(r.height,r.width*650/700);
+  const gesture=wheelGesture(wheelSamples,height);
+  wheelSamples=[];wheelCooldown=performance.now()+900;
+  if(gesture?.dy>=.08)takeShot(gesture);
+}
+canvas.addEventListener('wheel',event=>{
+  if(event.ctrlKey || event.metaKey)return; // Preserve pinch-to-zoom.
+  if(performance.now()<wheelCooldown){event.preventDefault();return;}
+  if(!canShoot() || swipe || Math.abs(event.deltaY)<.1)return;
+  event.preventDefault();
+  if(!wheelSamples.length)wheelDeadline=setTimeout(finishWheel,320);
+  wheelSamples.push({dx:event.deltaX,dy:event.deltaY,mode:event.deltaMode,time:event.timeStamp});
+  const r=canvas.getBoundingClientRect();$('power').value=Math.min(1,wheelGesture(wheelSamples,Math.min(r.height,r.width*650/700)).dy/.6);
+  clearTimeout(wheelTimer);wheelTimer=setTimeout(finishWheel,110);
+},{passive:false});
 function draw() {
-  let position = { x: 0, y: 1.6, z: 6 }, legacy = null;
-  if (shot) {
-    const elapsed = performance.now() - shot.start;
-    position = sampleFrames(shot.trajectory.flight, elapsed);
-    if (elapsed >= shot.trajectory.flightDuration) {
-      message(shot.trajectory.made ? 'Bucket! Two points.' : `${shot.trajectory.feedback}. Rebound saved for the other player.`);
-      $('shot-feedback').textContent = shot.trajectory.feedback;
-      shot = null; render();
+  let player=playerPosition(),position={x:player.x,y:1.6,z:player.z},focus=null;
+  if(shot) {
+    player=shot.player;
+    const elapsed=performance.now()-shot.start;
+    position=sampleFrames(shot.trajectory.flight,elapsed);focus=position;
+    if(elapsed>=shot.trajectory.flightDuration) {
+      message(shot.trajectory.made?'Bucket! Two points.':`${shot.trajectory.feedback}. Rebound saved for the other player.`);
+      $('shot-feedback').textContent=shot.trajectory.feedback;
+      shot=null;render();
     }
-  } else if (game?.phase === 'rebound') {
-    const elapsed = playback ? performance.now() - playback.start : 0;
-    if(game.trajectory.version === 2) position = sampleFrames(game.trajectory.frames, elapsed);
-    else legacy = reboundPosition(game.trajectory, elapsed);
-    if(playback && elapsed > reboundDuration(playback.trajectory)) { playback = null; message('It got away! Replay the saved rebound.'); render(); }
+  } else if(game?.phase==='rebound') {
+    const elapsed=playback?performance.now()-playback.start:0;
+    position=reboundWorld(game.trajectory,elapsed);focus=position;
+    if(playback && elapsed>reboundDuration(playback.trajectory)){playback=null;message('It got away! Replay the saved rebound.');render();}
   }
-  if(keyboardCharge !== null) $('power').value = Math.min(1, (performance.now() - keyboardCharge) / 600);
-  drawCourt({ position, time: performance.now(), trail: swipe, ready: canShoot(), legacy });
+  if(keyboardCharge!==null)$('power').value=Math.min(1,(performance.now()-keyboardCharge)/600);
+  drawCourt({position,player,focus,time:performance.now(),ready:canShoot(),moving:Boolean(shot||playback)});
   requestAnimationFrame(draw);
 }
 draw();

@@ -4,7 +4,7 @@ A two-player browser basketball game. Invite a friend, aim a shot, and tap the m
 
 ## Run
 
-Requires Node.js 22 or newer. No third-party runtime dependencies or build step.
+Requires Node.js 22 or newer. Install the pinned Three.js dependency once with `npm ci`. No asset build step or CDN is required.
 
 ```sh
 npm start
@@ -12,17 +12,17 @@ npm start
 
 Open the server on port 3000, enter a player name, and share the invite link with your friend. Use separate browsers or browser profiles for the two players. Returning players should use their original browser and game link: an HTTP-only cookie identifies their seat. Player names are display names, not password accounts.
 
-Swipe upward starting on the ball, using your finger or a mouse/trackpad click-and-drag. Swipe direction sets lateral aim; length and release speed set launch power. A smooth upward flick of roughly a third of the court height is a useful starting point. Short, sideways, and overpowered swipes miss; shots can also bounce off the rim or backboard.
+Swipe upward starting on the ball with your finger or mouse. On a trackpad, swipe/scroll directly over the court; no click is needed. Either scroll direction works because OS natural-scrolling settings differ. Swipe direction sets lateral aim; length and release speed set launch power. A faster swipe of the same length launches farther and can overshoot. A smooth upward flick of roughly a third of the court height is a useful starting point. Short, sideways, and overpowered swipes miss; shots can also bounce off the rim or backboard.
 
 For rebounds, press Play the rebound and tap the moving ball. Keyboard players can focus the court, adjust aim with Left/Right, then hold and release Space to charge and shoot. During a rebound, Space catches the ball. If the ball escapes or you leave, replay the saved bounce when you return.
 
-The court, basket, ball, and shadow use perspective projection from 3D world coordinates. The shared simulation uses gravity, sphere/rim and backboard collisions, floor restitution, and friction. Misses store the simulated 3D path after the first impact; replaying it continues exactly where the shooting animation ends. Older saved rebounds remain playable.
+The court is a real Three.js WebGL scene with textured meshes, lighting, shadows, and a camera at player eye level. The camera follows the ball during a shot or rebound. A catch saves its exact court coordinates for that player; their next shot and view use that location, including after a reload or server restart. The shared simulation uses gravity, sphere/rim and backboard collisions, floor restitution, and friction. Misses store the simulated 3D path after the first impact; replaying it continues exactly where the shooting animation ends. Older saved rebounds remain playable.
 
 ```sh
 npm test
 ```
 
-Tests cover both seats, turn enforcement, gesture-based scoring, saved rebounds across a server restart, catch validation, replay after timeout, deterministic trajectories, floor bounds, decreasing bounce energy, and rim/backboard deflections.
+Tests cover both seats, turn enforcement, gesture-based scoring, saved rebounds across a server restart, catch validation, replay after timeout, deterministic trajectories, floor bounds, decreasing bounce energy, rim/backboard deflections, saved catch locations, WebGL camera agreement, and direct trackpad swipe speed.
 
 ## Persistence and hosting
 
