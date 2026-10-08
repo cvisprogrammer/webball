@@ -31,7 +31,7 @@ test('ball respects the floor, loses bounce energy, and shot/rebound paths meet'
 });
 
 test('rim and backboard physically deflect shots', () => {
-  assert.equal(simulateShot({ dx: 0, dy: .34, duration: .32 }).feedback, 'Off the rim');
+  assert.equal(simulateShot({ dx: 0, dy: .34, duration: .32 },{x:.1,z:0}).feedback, 'Off the rim');
   const banks = [];
   for(let dy=.25;dy<=.65;dy+=.005) {
     const shot = simulateShot({dx: .03,dy,duration:.32});
@@ -73,12 +73,12 @@ test('shots from nearby and sideways catch locations can reach the basket', () =
   }
 });
 
-test('near-rim shots forgive small power and aim errors while large errors still miss',()=>{
+test('friendly shot assistance forgives broader power and aim errors while large errors still miss',()=>{
   const guide=shotGuide();
-  assert.ok(guide.maxSpeed-guide.minSpeed>.3,'a usable scoring window rather than the former 0.14 m/s interval');
-  for(const speed of [8.75,8.9,9.03]) {
-    const dy=.35,gesture={dx:.008,dy,duration:.32,velocity:(speed-3.8-dy*7)/2.3};
-    assert.equal(simulateShot(gesture).made,true,`small error at ${speed} m/s still scores`);
+  assert.ok(guide.maxSpeed-guide.minSpeed>1.2,'a broad scoring window rather than the previous 0.44 m/s interval');
+  for(const speed of [8.3,8.65,9.35]) {
+    const dy=.35,gesture={dx:.025,dy,duration:.32,velocity:(speed-3.8-dy*7)/2.3};
+    assert.equal(simulateShot(gesture).made,true,`power and aim error at ${speed} m/s still scores`);
   }
   assert.equal(simulateShot({dx:.15,dy:.35,duration:.32}).made,false);
   assert.equal(simulateShot({dx:0,dy:.85,duration:.08}).made,false);

@@ -4,7 +4,7 @@ export const HOOP = { x: 0, y: 3.05, z: 0, radius: .23 };
 const clamp = (v, low, high) => Math.max(low, Math.min(high, v));
 export const START_POSITION = { x: 0, z: 6 };
 export const COURT_BOUNDS = { minX: -3.8, maxX: 3.8, minZ: -.75, maxZ: 7.5, maxY: 7.35 };
-export const SHOT_ASSIST_RADIUS = .38;
+export const SHOT_ASSIST_RADIUS = 1.1;
 export function courtPosition(position = START_POSITION) {
   return { x: clamp(Number.isFinite(position?.x) ? position.x : START_POSITION.x, COURT_BOUNDS.minX, COURT_BOUNDS.maxX),
     z: clamp(Number.isFinite(position?.z) ? position.z : START_POSITION.z, COURT_BOUNDS.minZ, COURT_BOUNDS.maxZ) };
@@ -69,6 +69,9 @@ export function validGesture(g) {
 export function simulateShot(gesture, origin = START_POSITION) {
   return simulate(gesture, courtPosition(origin), true);
 }
+export function shotOnTarget(gesture, origin = START_POSITION) {
+  return !!validGesture(gesture) && simulate(gesture, courtPosition(origin), false).made;
+}
 function simulate(gesture, origin, savePath) {
   if (!validGesture(gesture)) throw new Error('Swipe upward from the ball to shoot');
   const speed = shotSpeed(gesture);
@@ -80,7 +83,7 @@ function simulate(gesture, origin, savePath) {
   const flat=speed*Math.cos(angle);
   let vx=flat*(forward.x-side*forward.z), vz=flat*(forward.z+side*forward.x);
   let vy = speed * Math.sin(angle);
-  let x = origin.x, y = 1.6, z = origin.z, made = false, contact = null, feedback = 'Air ball', shotLive = true;
+  let x = origin.x, y = 1.6, z = origin.z, made = false, contact = null, feedback = 'Air ball', shotLive = true, assisted = false;
   const frames = savePath ? [[0, x, y, z]] : null, dt = 1 / 120;
   const impact = (time, kind) => { if (contact === null && !made) { contact = time; feedback = kind; } };
   for (let step = 1; step <= 1440; step++) {
@@ -88,14 +91,15 @@ function simulate(gesture, origin, savePath) {
     vy -= 9.81 * dt;
     vx *= 1 - .025 * dt; vz *= 1 - .025 * dt;
     x += vx * dt; y += vy * dt; z += vz * dt;
-    // A small, local nudge helps near misses enter the unchanged rim. Large
-    // power or aim errors still miss; swipe velocity still launches the ball.
-    if (shotLive && contact === null && previousY > HOOP.y + .65 && y <= HOOP.y + .65 && vy < 0) {
+    // Redirect a nearby descending shot once, before the board or rim can
+    // block it. Launch speed and large misses remain driven by the swipe.
+    if (shotLive && !assisted && contact === null && y <= HOOP.y + 1.15 && y > HOOP.y + .15 && vy < 0) {
       const remaining = (vy + Math.sqrt(vy * vy + 2 * 9.81 * (y - HOOP.y))) / 9.81;
       const landingX = x + vx * remaining, landingZ = z + vz * remaining;
       if (remaining > .05 && Math.hypot(landingX, landingZ) <= SHOT_ASSIST_RADIUS) {
         const entryTime = (vy + Math.sqrt(vy * vy + 2 * 9.81 * (y - HOOP.y - .05))) / 9.81;
         vx = -x / entryTime; vz = -z / entryTime;
+        assisted = true;
       }
     }
     // Plane backboard and a spherical ball, with energy lost on impact.
@@ -138,7 +142,7 @@ function simulate(gesture, origin, savePath) {
   const start = sampleFrames(frames, split * 1000);
   const rebound = [[0, start.x, start.y, start.z], ...frames.filter(f => f[0] > split).map(f => [f[0] - split, ...f.slice(1)])];
   const flight = [...frames.filter(f => f[0] < split), [split, start.x, start.y, start.z]];
-  return { version: 4, frames: rebound, flight: made ? frames.filter(f => f[0] <= 3) : flight,
+  return { version: 5, frames: rebound, flight: made ? frames.filter(f => f[0] <= 3) : flight,
     duration: rebound.at(-1)[0] * 1000, flightDuration: made ? 3000 : split * 1000, made, feedback, gesture, origin: {x:origin.x,z:origin.z} };
 }
 

@@ -32,10 +32,25 @@ test('slowing, pausing and reversing affect the live guide and release together'
   moveSwipe(swipe,{x:.5,y:.57},160);
   const slow=swipeGesture(swipe,160);
   assert.ok(shotSpeed(slow)<shotSpeed(fast));
-  const stopped=swipeGesture(swipe,260);
+  assert.ok(swipeGesture(swipe,280).velocity<slow.velocity,'a pause still lowers the live velocity');
+  const stopped=swipeGesture(swipe,360);
   assert.equal(stopped.velocity,0);
-  moveSwipe(swipe,{...swipe.to},260);
-  assert.equal(shotSpeed(swipeGesture(swipe,260)),shotSpeed(stopped));
-  moveSwipe(swipe,{x:.5,y:.67},340);
-  assert.equal(swipeGesture(swipe,340).velocity,0,'a downward reversal does not count as an upward flick');
+  moveSwipe(swipe,{...swipe.to},360);
+  assert.equal(shotSpeed(swipeGesture(swipe,360)),shotSpeed(stopped));
+  moveSwipe(swipe,{x:.5,y:.67},440);
+  assert.equal(swipeGesture(swipe,440).velocity,0,'a downward reversal does not count as an upward flick');
+});
+
+test('lifting a finger briefly after a scoring flick keeps the previewed velocity',()=>{
+  for(const gap of [12,32,49,75,95]) {
+    const swipe=createSwipe({x:.5,y:.8},0,1);
+    for(let time=40;time<=320;time+=40)moveSwipe(swipe,{x:.5,y:.8-.35*time/320},time);
+    const preview=swipeGesture(swipe,320),power=shotSpeed(preview);
+    assert.equal(shotSpeed(swipeGesture(swipe,320+gap)),power,'live guide holds through the brief lift-off gap');
+    moveSwipe(swipe,{...swipe.to},320+gap);
+    const release=swipeGesture(swipe,320+gap);
+    assert.equal(shotSpeed(release),power,'release launches with the same previewed velocity');
+    assert.equal(simulateShot(release).made,true,'the normal lift-off gap does not turn a good swipe into a miss');
+    assert.deepEqual(simulateShot(release).flight,simulateShot(preview).flight);
+  }
 });

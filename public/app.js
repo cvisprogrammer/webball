@@ -1,4 +1,4 @@
-import { reboundPosition, reboundDuration, simulateShot, validGesture, sampleFrames, project, reboundWorld, START_POSITION, courtPosition, SHOT_ASSIST_RADIUS, shotSpeed, shotGuide, MAX_SHOT_SPEED } from './physics.js';
+import { reboundPosition, reboundDuration, simulateShot, validGesture, sampleFrames, project, reboundWorld, START_POSITION, courtPosition, SHOT_ASSIST_RADIUS, shotSpeed, shotGuide, shotOnTarget, MAX_SHOT_SPEED } from './physics.js';
 import { createCourt, pointerPosition } from './court3d.js';
 import { createPractice, practiceAction } from './practice.js';
 import { createSwipe, moveSwipe, swipeGesture } from './swipe.js';
@@ -171,14 +171,15 @@ function updateRangeGuide(time=performance.now()) {
   const speed=gesture && gesture.dy>0 ? shotSpeed(gesture) : 0;
   const distance=Math.hypot(player.x,player.z);
   const aimed=gesture && Math.abs(gesture.dx/Math.max(.001,gesture.dy))*distance<SHOT_ASSIST_RADIUS*.6;
-  const aligned=gesture && gesture.velocity>=.05 && validGesture(gesture) && aimed && guide.reachable && speed>=guide.minSpeed && speed<=guide.maxSpeed;
+  const inRange=speed>=guide.minSpeed && speed<=guide.maxSpeed;
+  const aligned=gesture && gesture.velocity>=.05 && inRange && guide.reachable && shotOnTarget(gesture,player);
   display.style.setProperty('--target-level',`${guide.speed/MAX_SHOT_SPEED*100}%`);
   display.style.setProperty('--zone-bottom',`${guide.minSpeed/MAX_SHOT_SPEED*100}%`);
   display.style.setProperty('--zone-height',`${(guide.maxSpeed-guide.minSpeed)/MAX_SHOT_SPEED*100}%`);
   display.style.setProperty('--power-level',`${speed/MAX_SHOT_SPEED*100}%`);
   display.classList.toggle('aligned',!!aligned);
   $('range-distance').textContent=`${distance.toFixed(1)} m`;
-  $('range-status').textContent=!gesture ? 'Hold ball' : gesture.dy<.08 ? 'Flick upward' : gesture.duration>2 ? 'Try again' : !aimed ? 'Aim straight' : gesture.velocity<.05 ? 'Keep moving' : aligned ? 'On target' : speed>guide.maxSpeed ? 'Swipe slower' : 'Swipe faster';
+  $('range-status').textContent=!gesture ? 'Hold ball' : gesture.dy<.08 ? 'Flick upward' : gesture.duration>2 ? 'Try again' : gesture.velocity<.05 ? 'Keep moving' : aligned ? 'On target' : !aimed || inRange ? 'Aim straight' : speed>guide.maxSpeed ? 'Swipe slower' : 'Swipe faster';
   $('power').value=speed;
   $('power').setAttribute('aria-valuetext',`${speed.toFixed(1)} meters per second; target ${guide.speed.toFixed(1)}`);
 }
