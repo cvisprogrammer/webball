@@ -1,4 +1,4 @@
-import { reboundPosition, reboundDuration, simulateShot, validGesture, sampleFrames, project, reboundWorld, START_POSITION, courtPosition, shotSpeed, shotGuide, shotOnTarget, MAX_SHOT_SPEED } from './physics.js';
+import { reboundPosition, reboundDuration, simulateShot, validGesture, sampleFrames, project, reboundWorld, START_POSITION, courtPosition, shotSpeed, shotGuide, shotOnTarget, MAX_SHOT_SPEED, netResponse } from './physics.js';
 import { createCourt, pointerPosition } from './court3d.js';
 import { createPractice, practiceAction } from './practice.js';
 import { createSwipe, moveSwipe, swipeGesture } from './swipe.js';
@@ -183,10 +183,11 @@ function updateRangeGuide(time=performance.now()) {
   $('power').setAttribute('aria-valuetext',`${speed.toFixed(1)} meters per second; target ${guide.speed.toFixed(1)}`);
 }
 function draw() {
-  let player=playerPosition(),position={x:player.x,y:1.6,z:player.z},focus=null;
+  let player=playerPosition(),position={x:player.x,y:1.6,z:player.z},focus=null,netState=netResponse(null,0);
   if(shot) {
     player=shot.player;
     const elapsed=performance.now()-shot.start;
+    netState=netResponse(shot.trajectory.netImpact,elapsed/1000);
     position=sampleFrames(shot.trajectory.flight,elapsed);focus=position;
     if(elapsed>=shot.trajectory.flightDuration) {
       const made=shot.trajectory.made;
@@ -202,7 +203,7 @@ function draw() {
     if(playback && elapsed>reboundDuration(playback.trajectory)){playback=null;message('It got away! Replay the saved rebound.');render();}
   }
   updateRangeGuide();
-  const state={position,player,focus,time:performance.now(),ready:canShoot(),moving:Boolean(shot||playback)};
+  const state={position,player,focus,netState,time:performance.now(),ready:canShoot(),moving:Boolean(shot||playback)};
   if(lightView)drawLightCourt(state);
   else {
     try { drawCourt(state); }

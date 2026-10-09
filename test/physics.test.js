@@ -1,14 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { simulateShot, sampleFrames, BALL_RADIUS, COURT_BOUNDS, courtPosition, project, reboundWorld, reboundPosition, validGesture, shotGuide, shotSpeed } from '../public/physics.js';
+import { simulateShot, sampleFrames, BALL_RADIUS, COURT_BOUNDS, courtPosition, project, reboundWorld, reboundPosition, validGesture, shotGuide, shotSpeed, HOOP, NET_LENGTH, netResponse, netPoint } from '../public/physics.js';
 import { cameraPose } from '../public/physics.js';
 import { PerspectiveCamera, Vector3 } from 'three';
 
 test('swipe power and direction affect scoring; simulation replays deterministically', () => {
   const good = { dx: 0, dy: .35, duration: .32 };
   assert.equal(simulateShot(good).made, true);
-  assert.equal(simulateShot({ ...good, dx: .12 }).made, true,'a small sideways error is forgiven');
-  assert.equal(simulateShot({ ...good, dy: .12 }).made, true,'a much gentler swipe is forgiven');
+  assert.equal(simulateShot({ ...good, dx: .08 }).made, true,'small sideways drift is still forgiven');
+  assert.equal(simulateShot({ ...good, dx: .12 }).made, false,'a more sideways flick now misses');
+  assert.equal(simulateShot({ ...good, dy: .12 }).made, false,'a weak swipe now falls outside the smaller power window');
   assert.equal(simulateShot({ ...good, dy: .08, duration: 1.2 }).made, false,'a tiny slow drag still misses');
   assert.equal(simulateShot({ ...good, duration: .08 }).made, false);
   const miss = simulateShot({ ...good, dx: .2 });
@@ -35,7 +36,7 @@ test('rim and backboard physically deflect shots', () => {
   assert.equal(simulateShot({ dx: 0, dy: .39, duration: .32 },{x:.1,z:0}).feedback, 'Off the rim');
   const banks = [];
   for(let dy=.25;dy<=.65;dy+=.005) {
-    const shot = simulateShot({dx: .21,dy,duration:.32});
+    const shot = simulateShot({dx: .15,dy,duration:.32});
     if(shot.feedback==='Off the backboard')banks.push(shot);
   }
   assert.ok(banks.length > 0, 'some shots hit the backboard');
@@ -74,21 +75,55 @@ test('shots from nearby and sideways catch locations can reach the basket', () =
   }
 });
 
-test('easy release assistance forgives gentle through quick flicks at different catch locations',()=>{
-  assert.ok(shotGuide().maxSpeed-shotGuide().minSpeed>6.9,'the starting scoring window is over five times wider');
+test('moderate assistance preserves forgiveness while requiring more precise release power',()=>{
+  const width=shotGuide().maxSpeed-shotGuide().minSpeed;
+  assert.ok(width>5.3 && width<5.5,'the starting power window is about a quarter narrower than 7 m/s');
   for(const origin of [{x:0,z:6},{x:1,z:2},{x:.1,z:0},{x:0,z:1},{x:.1,z:1},{x:2,z:-.7},{x:3.8,z:7.5}]) {
     const guide=shotGuide(origin);
-    assert.ok(guide.maxSpeed-guide.minSpeed>4.5,'a broad scoring window even at difficult catch locations');
+    assert.ok(guide.maxSpeed-guide.minSpeed>3.7,'a forgiving scoring window even at difficult catch locations');
     for(const speed of [guide.minSpeed+.1,guide.minSpeed+.3,guide.speed,guide.maxSpeed-.1]) {
       // Express any valid power, including low-power shots, as a real upward
       // flick without a negative or out-of-range velocity.
-      const dy=Math.min(.35,(speed-3.8)/9),gesture={dx:dy*.28,dy,duration:.32,velocity:(speed-3.8-dy*7)/2.3};
+      const dy=Math.min(.35,(speed-3.8)/9),gesture={dx:dy*.24,dy,duration:.32,velocity:(speed-3.8-dy*7)/2.3};
       assert.ok(validGesture(gesture));
       assert.equal(simulateShot(gesture,origin).made,true,`power ${speed} and sideways drift still score at ${JSON.stringify(origin)}`);
     }
   }
   assert.equal(simulateShot({dx:.15,dy:.35,duration:.32}).made,false);
   assert.equal(simulateShot({dx:0,dy:.85,duration:.08}).made,false);
+});
+
+test('a basket loses speed in the net, then accelerates freely below it',()=>{
+  const shot=simulateShot({dx:0,dy:.35,duration:.32});
+  assert.equal(shot.made,true);
+  const impact=shot.netImpact;
+  assert.ok(impact.time>0 && impact.velocity.y<0);
+  const entry=sampleFrames(shot.flight,impact.time*1000);
+  assert.ok(Math.abs(entry.y-HOOP.y)<.015,'the net reaction begins at the descending hoop crossing');
+  const exitIndex=shot.flight.findIndex(f=>f[0]>impact.time && f[2]<HOOP.y-NET_LENGTH);
+  const before=shot.flight[exitIndex-1],exit=shot.flight[exitIndex];
+  const exitSpeed=(before[2]-exit[2])/(exit[0]-before[0]);
+  assert.ok(exitSpeed < -impact.velocity.y*.9,'the net noticeably slows the downward ball');
+  const later=shot.flight[exitIndex+3],next=shot.flight[exitIndex+4];
+  const laterSpeed=(later[2]-next[2])/(next[0]-later[0]);
+  assert.ok(laterSpeed>exitSpeed+.5,'gravity accelerates the ball again after it exits');
+  assert.equal(simulateShot({dx:.2,dy:.35,duration:.32}).netImpact,null,'a miss never triggers a swish');
+});
+
+test('net motion begins with the basket, keeps the rim attachments fixed and settles',()=>{
+  const shot=simulateShot({dx:0,dy:.35,duration:.32}),impact=shot.netImpact;
+  const rest=netResponse(null,0),before=netResponse(impact,impact.time-.01);
+  assert.deepEqual(before,rest);
+  const pulled=netResponse(impact,impact.time+.1),settling=netResponse(impact,impact.time+.9);
+  const attachment={x:HOOP.radius,y:HOOP.y-.02,z:0};
+  const bottom={x:.13,y:HOOP.y-.02-NET_LENGTH,z:0};
+  assert.deepEqual(netPoint(attachment,pulled),attachment,'the cords stay tied to the rim');
+  const stretched=netPoint(bottom,pulled);
+  assert.ok(stretched.y<bottom.y-.03 && stretched.x>bottom.x,'the lower net stretches and opens');
+  assert.ok(Math.abs(pulled.swayZ)>.005,'incoming horizontal momentum sways the net');
+  assert.ok(Math.abs(settling.stretch)<Math.abs(pulled.stretch)*.1,'the reaction damps out');
+  assert.deepEqual(netPoint(bottom,netResponse(impact,impact.time+2)),bottom,'the resting shape is restored');
+  assert.deepEqual(netResponse(JSON.parse(JSON.stringify(impact)),impact.time+.1),pulled,'saved contact data reproduces the same motion');
 });
 
 test('high and sideways shots stay on court, including every rebound sample',()=>{

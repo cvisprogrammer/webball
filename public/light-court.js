@@ -1,4 +1,4 @@
-import { BALL_RADIUS, HOOP, START_POSITION, cameraPose, project } from './physics.js';
+import { BALL_RADIUS, HOOP, NET_LENGTH, START_POSITION, cameraPose, project, netResponse, netPoint } from './physics.js';
 const W = 700, H = 650;
 
 // A separate canvas remains usable when the original WebGL context is lost.
@@ -25,11 +25,11 @@ export function createLightCourt(canvas) {
     return output.map(p => projected(p, player, focus));
   }
   const point = (x, y, z) => ({ x, y, z });
-  const draw = ({ position, player = START_POSITION, focus = null, ready = false } = {}) => {
+  const draw = ({ position, player = START_POSITION, focus = null, ready = false, netState = netResponse(null,0) } = {}) => {
     if (!active) { active = true; canvas.style.opacity = '0'; layer.hidden = false; }
     const bounds = canvas.getBoundingClientRect(), width = Math.round(bounds.width), height = Math.round(bounds.height);
     if (!width || !height) return;
-    const frame = JSON.stringify([position, player, focus, ready, width, height]);
+    const frame = JSON.stringify([position, player, focus, ready, netState, width, height]);
     if (frame === previous) return;
     previous = frame;
     if (layer.width !== width || layer.height !== height) { layer.width = width; layer.height = height; }
@@ -62,7 +62,10 @@ export function createLightCourt(canvas) {
     for (let i = 0; i < 16; i++) {
       const a = i / 16 * Math.PI * 2, b = (i + 1) / 16 * Math.PI * 2;
       line(point(Math.cos(a) * HOOP.radius, HOOP.y, Math.sin(a) * HOOP.radius), point(Math.cos(b) * HOOP.radius, HOOP.y, Math.sin(b) * HOOP.radius), '#f08942', 3);
-      line(point(Math.cos(a) * HOOP.radius, HOOP.y, Math.sin(a) * HOOP.radius), point(Math.cos(a + .35) * .13, HOOP.y - .42, Math.sin(a + .35) * .13), '#e8e9ce', 1);
+      for(const direction of [-1,1])for(let j=0;j<5;j++) {
+        const cord=t=>netPoint(point(Math.cos(a+direction*.45*t)*(HOOP.radius-.1*t),HOOP.y-.02-NET_LENGTH*t,Math.sin(a+direction*.45*t)*(HOOP.radius-.1*t)),netState);
+        line(cord(j/5),cord((j+1)/5),'#e8e9ce',1);
+      }
     }
     const ball = projected(position, player, focus);
     if (ball.depth > .06 && Number.isFinite(ball.x + ball.y + ball.scale)) {

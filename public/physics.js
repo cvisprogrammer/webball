@@ -1,6 +1,7 @@
 export const REBOUND_DURATION = 8000;
 export const BALL_RADIUS = .12;
 export const HOOP = { x: 0, y: 3.05, z: 0, radius: .23 };
+export const NET_LENGTH = .42;
 const clamp = (v, low, high) => Math.max(low, Math.min(high, v));
 export const START_POSITION = { x: 0, z: 6 };
 export const COURT_BOUNDS = { minX: -3.8, maxX: 3.8, minZ: -.75, maxZ: 7.5, maxY: 7.35 };
@@ -85,16 +86,16 @@ function simulate(gesture, origin, savePath, assistRelease = true) {
   const direction=gesture.dx/gesture.dy;
   // Small finger/trackpad drift aims at the hoop; deliberate sideways flicks
   // still miss and leave a physical rebound for the next player.
-  const side=clamp(assistRelease ? Math.sign(direction)*Math.max(0,Math.abs(direction)-.3)*2 : direction,-1.5,1.5);
+  const side=clamp(assistRelease ? Math.sign(direction)*Math.max(0,Math.abs(direction)-.25)*2 : direction,-1.5,1.5);
   const angle=launchAngle(distance);
   const flat=speed*Math.cos(angle);
   let vx=flat*(forward.x-side*forward.z), vz=flat*(forward.z+side*forward.x);
   let vy = speed * Math.sin(angle);
-  let x = origin.x, y = 1.6, z = origin.z, made = false, contact = null, feedback = 'Air ball', shotLive = true, assisted = false;
+  let x = origin.x, y = 1.6, z = origin.z, made = false, contact = null, feedback = 'Air ball', shotLive = true, assisted = false, netImpact = null, netExited = false;
   const frames = savePath ? [[0, x, y, z]] : null, dt = 1 / 120;
   const impact = (time, kind) => { if (contact === null && !made) { contact = time; feedback = kind; } };
   for (let step = 1; step <= 1440; step++) {
-    const time = step * dt, previousY = y, previousZ = z;
+    const time = step * dt, previousX = x, previousY = y, previousZ = z;
     vy -= 9.81 * dt;
     vx *= 1 - .025 * dt; vz *= 1 - .025 * dt;
     x += vx * dt; y += vy * dt; z += vz * dt;
@@ -128,7 +129,15 @@ function simulate(gesture, origin, savePath, assistRelease = true) {
       }
     }
     if (shotLive && !made && previousY > HOOP.y && y <= HOOP.y && vy < 0 && Math.hypot(x, z) < HOOP.radius - BALL_RADIUS) {
+      const crossing=(previousY-HOOP.y)/(previousY-y);
+      netImpact={time:time-dt+crossing*dt,x:previousX+(x-previousX)*crossing,z:previousZ+(z-previousZ)*crossing,velocity:{x:vx,y:vy,z:vz}};
       made = true; feedback = 'Bucket!'; vx *= .5; vz *= .5;
+    }
+    // The hanging cords dissipate energy only after a basket and while the
+    // ball is inside the net. Gravity resumes its normal acceleration below it.
+    if (made && !netExited) {
+      if(y<=HOOP.y-NET_LENGTH || Math.hypot(x,z)>HOOP.radius+BALL_RADIUS)netExited=true;
+      else if(y<=HOOP.y){vy *= Math.exp(-5*dt); vx *= Math.exp(-9*dt); vz *= Math.exp(-9*dt);}
     }
     if (y < BALL_RADIUS) {
       shotLive = false;
@@ -149,7 +158,7 @@ function simulate(gesture, origin, savePath, assistRelease = true) {
   const start = sampleFrames(frames, split * 1000);
   const rebound = [[0, start.x, start.y, start.z], ...frames.filter(f => f[0] > split).map(f => [f[0] - split, ...f.slice(1)])];
   const flight = [...frames.filter(f => f[0] < split), [split, start.x, start.y, start.z]];
-  return { version: 6, frames: rebound, flight: made ? frames.filter(f => f[0] <= 3) : flight,
+  return { version: 7, netImpact, frames: rebound, flight: made ? frames.filter(f => f[0] <= 3) : flight,
     duration: rebound.at(-1)[0] * 1000, flightDuration: made ? 3000 : split * 1000, made, feedback, gesture, origin: {x:origin.x,z:origin.z} };
 }
 
@@ -189,7 +198,7 @@ function shotCalibration(origin) {
   }
   const speed=best?(best.minSpeed+best.maxSpeed)/2:clamp(estimate,5,15.8);
   const calibration={speed:best && !makes(speed)?best.minSpeed:speed,minSpeed:best?.minSpeed??speed,maxSpeed:best?.maxSpeed??speed,reachable:!!best,
-    response:best ? Math.max(.000001,Math.min(.2,(best.maxSpeed-best.minSpeed)/7)) : 1};
+    response:best ? Math.max(.000001,Math.min(.25,(best.maxSpeed-best.minSpeed)/5.4)) : 1};
   if(calibrationCache.size>200)calibrationCache.clear();calibrationCache.set(key,calibration);return calibration;
 }
 export function shotGuide(origin = START_POSITION) {
@@ -198,4 +207,23 @@ export function shotGuide(origin = START_POSITION) {
   return {speed,reachable,
     minSpeed:clamp(speed+(calibration.minSpeed-speed)/response,4.5,MAX_SHOT_SPEED),
     maxSpeed:clamp(speed+(calibration.maxSpeed-speed)/response,4.5,MAX_SHOT_SPEED)};
+}
+
+// The recorded crossing drives both renderers without restarting the motion
+// if a phone switches to the light court partway through a basket.
+export function netResponse(impact, elapsed) {
+  const age=impact ? elapsed-impact.time : -1;
+  if(age<0 || age>1.5)return {stretch:0,flare:0,swayX:0,swayZ:0};
+  const strength=clamp(-impact.velocity.y/6,.4,1.2);
+  const pulse=Math.sin(age*10)*Math.exp(-age*4);
+  const sway=Math.sin(age*9)*Math.exp(-age*3);
+  return {stretch:.1*strength*pulse,
+    flare:.04*strength*Math.sin(Math.PI*clamp(age/.2,0,1))*Math.exp(-age*4),
+    swayX:clamp(impact.velocity.x*.035+impact.x*.25,-.06,.06)*sway,
+    swayZ:clamp(impact.velocity.z*.035+impact.z*.25,-.06,.06)*sway};
+}
+export function netPoint(point, response) {
+  const depth=clamp((HOOP.y-.02-point.y)/NET_LENGTH,0,1),weight=depth*depth;
+  const spread=1+response.flare*depth/.13;
+  return {x:point.x*spread+response.swayX*weight,y:point.y-response.stretch*weight,z:point.z*spread+response.swayZ*weight};
 }

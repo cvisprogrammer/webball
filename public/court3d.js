@@ -1,5 +1,5 @@
 import * as THREE from '/vendor/three.module.js';
-import { cameraPose, BALL_RADIUS, START_POSITION } from './physics.js';
+import { cameraPose, BALL_RADIUS, START_POSITION, HOOP, NET_LENGTH, netResponse } from './physics.js';
 const W=700,H=650;
 export function pointerPosition(canvas,event) {
   const r=canvas.getBoundingClientRect(),scale=Math.min(r.width/W,r.height/H);
@@ -62,10 +62,16 @@ export function createCourt(canvas, { onContextLost = () => {}, onContextRestore
   tube([[-.3,2.98,-.418],[.3,2.98,-.418],[.3,3.5,-.418],[-.3,3.5,-.418],[-.3,2.98,-.418]],.012,boardLine);
   box(.13,.045,.22,'#da6b2a',0,3.05,-.34);
   const rim=mesh(new THREE.TorusGeometry(.23,.018,12,64),mat('#eb7028',{metalness:.6,roughness:.3}),0,3.05,0);rim.rotation.x=Math.PI/2;
-  const net=new THREE.Group();scene.add(net);const netMaterial=mat('#e5e2d3',{roughness:1});
+  const net=new THREE.Group();net.name='basketball-net';scene.add(net);const netMaterial=mat('#e5e2d3',{roughness:1});
+  const cords=[];
   for(let i=0;i<16;i++)for(const direction of[-1,1]) {
-    const a=i/16*Math.PI*2,points=[];for(let j=0;j<=5;j++){const t=j/5,r=.23-.1*t,angle=a+direction*.45*t;points.push([Math.cos(angle)*r,3.03-.42*t,Math.sin(angle)*r]);}
+    const a=i/16*Math.PI*2,points=[];for(let j=0;j<=5;j++){const t=j/5,r=HOOP.radius-.1*t,angle=a+direction*.45*t;points.push([Math.cos(angle)*r,HOOP.y-.02-NET_LENGTH*t,Math.sin(angle)*r]);}
     const lace=tube(points,.0035,netMaterial);scene.remove(lace);net.add(lace);
+    const attribute=lace.geometry.getAttribute('position'),base=attribute.array.slice();
+    attribute.setUsage(THREE.DynamicDrawUsage);
+    const depths=new Float32Array(attribute.count);
+    for(let v=0;v<depths.length;v++)depths[v]=Math.max(0,Math.min(1,(HOOP.y-.02-base[v*3+1])/NET_LENGTH));
+    cords.push({attribute,base,depths});
   }
   // Equirectangular leather texture with seams and pebbled bump detail.
   const leather=document.createElement('canvas');leather.width=mobile?512:1024;leather.height=leather.width/2;const lc=leather.getContext('2d');lc.scale(leather.width/1024,leather.height/512);lc.fillStyle='#d77624';lc.fillRect(0,0,1024,512);
@@ -89,14 +95,28 @@ export function createCourt(canvas, { onContextLost = () => {}, onContextRestore
     recoveryExtension=renderer.getContext().getExtension('WEBGL_lose_context');
     renderer.shadowMap.enabled=false;renderer.setPixelRatio(1);canvas.dataset.renderer='webgl';onContextRestored();
   });
-  return function draw({position={x:0,y:1.6,z:6},player=START_POSITION,focus=null,time=0,ready=false,moving=false}={}) {
+  let previousNet=null;
+  return function draw({position={x:0,y:1.6,z:6},player=START_POSITION,focus=null,netState=netResponse(null,0),time=0,ready=false,moving=false}={}) {
     if(lost || (mobile && moving && time-lastRender<1000/30))return;
     const bounds=canvas.getBoundingClientRect();
     const width=Math.round(Math.min(bounds.width||W,(bounds.height||H)*W/H,W));
     if(width!==renderWidth){renderWidth=width;renderer.setSize(width,width*H/W,false);}
-    const frame=JSON.stringify([position,player,focus,ready,renderWidth,moving?time:0]);
+    const frame=JSON.stringify([position,player,focus,ready,netState,renderWidth,moving?time:0]);
     if(frame===previousFrame)return;previousFrame=frame;
     const pose=cameraPose(player,focus);camera.position.set(pose.eye.x,pose.eye.y,pose.eye.z);camera.lookAt(pose.target.x,pose.target.y,pose.target.z);
+    const netFrame=JSON.stringify(netState);
+    if(netFrame!==previousNet) {
+      previousNet=netFrame;
+      for(const {attribute,base,depths} of cords) {
+        for(let v=0;v<depths.length;v++) {
+          const i=v*3,depth=depths[v],weight=depth*depth,spread=1+netState.flare*depth/.13;
+          attribute.array[i]=base[i]*spread+netState.swayX*weight;
+          attribute.array[i+1]=base[i+1]-netState.stretch*weight;
+          attribute.array[i+2]=base[i+2]*spread+netState.swayZ*weight;
+        }
+        attribute.needsUpdate=true;
+      }
+    }
     basketball.position.set(position.x,position.y,position.z);basketball.rotation.set(position.z*.6,moving?time*.0008:0,position.x*.4);
     halo.visible=ready;halo.position.copy(basketball.position);halo.quaternion.copy(camera.quaternion);
     if(contactShadow.visible){contactShadow.position.set(position.x,.025,position.z);contactShadow.scale.setScalar(1+position.y*.15);contactShadow.material.opacity=Math.max(.04,.25-position.y*.025);}
