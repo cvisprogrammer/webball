@@ -72,13 +72,20 @@ export function simulateShot(gesture, origin = START_POSITION) {
 export function shotOnTarget(gesture, origin = START_POSITION) {
   return !!validGesture(gesture) && simulate(gesture, courtPosition(origin), false).made;
 }
-function simulate(gesture, origin, savePath) {
+function simulate(gesture, origin, savePath, assistRelease = true) {
   if (!validGesture(gesture)) throw new Error('Swipe upward from the ball to shoot');
-  const speed = shotSpeed(gesture);
+  const power = shotSpeed(gesture);
+  const calibration = assistRelease ? shotCalibration(origin) : null;
+  // Compress power errors around a release that actually scores from this
+  // catch location. Swipe speed remains monotonic, with a much wider window.
+  const speed = calibration?.reachable ? calibration.speed + (power-calibration.speed)*calibration.response : power;
   const distance = Math.hypot(origin.x,origin.z);
   const forward = {x:-origin.x/(distance||1),z:-origin.z/(distance||1)};
   if(origin.x===0 && origin.z===0)forward.z=-1;
-  const side=clamp(gesture.dx/gesture.dy,-1.5,1.5);
+  const direction=gesture.dx/gesture.dy;
+  // Small finger/trackpad drift aims at the hoop; deliberate sideways flicks
+  // still miss and leave a physical rebound for the next player.
+  const side=clamp(assistRelease ? Math.sign(direction)*Math.max(0,Math.abs(direction)-.3)*2 : direction,-1.5,1.5);
   const angle=launchAngle(distance);
   const flat=speed*Math.cos(angle);
   let vx=flat*(forward.x-side*forward.z), vz=flat*(forward.z+side*forward.x);
@@ -142,20 +149,20 @@ function simulate(gesture, origin, savePath) {
   const start = sampleFrames(frames, split * 1000);
   const rebound = [[0, start.x, start.y, start.z], ...frames.filter(f => f[0] > split).map(f => [f[0] - split, ...f.slice(1)])];
   const flight = [...frames.filter(f => f[0] < split), [split, start.x, start.y, start.z]];
-  return { version: 5, frames: rebound, flight: made ? frames.filter(f => f[0] <= 3) : flight,
+  return { version: 6, frames: rebound, flight: made ? frames.filter(f => f[0] <= 3) : flight,
     duration: rebound.at(-1)[0] * 1000, flightDuration: made ? 3000 : split * 1000, made, feedback, gesture, origin: {x:origin.x,z:origin.z} };
 }
 
-const guideCache = new Map();
-export function shotGuide(origin = START_POSITION) {
+const calibrationCache = new Map();
+function shotCalibration(origin) {
   origin = courtPosition(origin);
   const key=`${origin.x},${origin.z}`;
-  if(guideCache.has(key))return guideCache.get(key);
+  if(calibrationCache.has(key))return calibrationCache.get(key);
   const distance=Math.hypot(origin.x,origin.z),angle=launchAngle(distance);
   const estimate=distance<.11 ? 6 : Math.sqrt(9.81*distance*distance/(2*Math.cos(angle)**2*(distance*Math.tan(angle)-1.45)));
   // Find a generous successful release interval in the actual simulation,
   // including its gravity, air drag, rim and backboard collisions.
-  const makes = speed => speed>=5 && speed<=15.8 && simulate({dx:0,dy:(speed-3.8)/(7+2.3/.32),duration:.32},origin,false).made;
+  const makes = speed => speed>=5 && speed<=15.8 && simulate({dx:0,dy:(speed-3.8)/(7+2.3/.32),duration:.32},origin,false,false).made;
   let best=null;
   function search(low,high,step) {
     let band=null;
@@ -167,12 +174,28 @@ export function shotGuide(origin = START_POSITION) {
     }
   }
   search(5,15.8,.025);
-  if(best){const broad=best;best=null;search(broad.minSpeed,broad.maxSpeed,.002);best ||= broad;}
+  // Near the underside of the rim, small collision changes can separate
+  // successful powers. Resolve those bands finely instead of bridging gaps.
+  let precision=.002;
+  if(best){
+    const broad=best,narrow=broad.maxSpeed-broad.minSpeed<.1;
+    precision=narrow ? .0001 : .002;best=null;
+    const padding=narrow ? .025 : 0;
+    search(broad.minSpeed-padding,broad.maxSpeed+padding,precision);best ||= broad;
+  }
   if(best) {
-    for(let i=0;i<5 && makes(best.minSpeed-.002);i++)best.minSpeed-=.002;
-    for(let i=0;i<5 && makes(best.maxSpeed+.002);i++)best.maxSpeed+=.002;
+    for(let i=0;i<5 && makes(best.minSpeed-precision);i++)best.minSpeed-=precision;
+    for(let i=0;i<5 && makes(best.maxSpeed+precision);i++)best.maxSpeed+=precision;
   }
   const speed=best?(best.minSpeed+best.maxSpeed)/2:clamp(estimate,5,15.8);
-  const guide={speed:best && !makes(speed)?best.minSpeed:speed,minSpeed:best?.minSpeed??speed,maxSpeed:best?.maxSpeed??speed,reachable:!!best};
-  if(guideCache.size>200)guideCache.clear();guideCache.set(key,guide);return guide;
+  const calibration={speed:best && !makes(speed)?best.minSpeed:speed,minSpeed:best?.minSpeed??speed,maxSpeed:best?.maxSpeed??speed,reachable:!!best,
+    response:best ? Math.max(.000001,Math.min(.2,(best.maxSpeed-best.minSpeed)/7)) : 1};
+  if(calibrationCache.size>200)calibrationCache.clear();calibrationCache.set(key,calibration);return calibration;
+}
+export function shotGuide(origin = START_POSITION) {
+  const calibration=shotCalibration(origin);
+  const {speed,response,reachable}=calibration;
+  return {speed,reachable,
+    minSpeed:clamp(speed+(calibration.minSpeed-speed)/response,4.5,MAX_SHOT_SPEED),
+    maxSpeed:clamp(speed+(calibration.maxSpeed-speed)/response,4.5,MAX_SHOT_SPEED)};
 }

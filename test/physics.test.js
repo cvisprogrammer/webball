@@ -7,8 +7,9 @@ import { PerspectiveCamera, Vector3 } from 'three';
 test('swipe power and direction affect scoring; simulation replays deterministically', () => {
   const good = { dx: 0, dy: .35, duration: .32 };
   assert.equal(simulateShot(good).made, true);
-  assert.equal(simulateShot({ ...good, dx: .12 }).made, false);
-  assert.equal(simulateShot({ ...good, dy: .12 }).made, false);
+  assert.equal(simulateShot({ ...good, dx: .12 }).made, true,'a small sideways error is forgiven');
+  assert.equal(simulateShot({ ...good, dy: .12 }).made, true,'a much gentler swipe is forgiven');
+  assert.equal(simulateShot({ ...good, dy: .08, duration: 1.2 }).made, false,'a tiny slow drag still misses');
   assert.equal(simulateShot({ ...good, duration: .08 }).made, false);
   const miss = simulateShot({ ...good, dx: .2 });
   assert.deepEqual(miss, simulateShot({ ...good, dx: .2 }));
@@ -31,10 +32,10 @@ test('ball respects the floor, loses bounce energy, and shot/rebound paths meet'
 });
 
 test('rim and backboard physically deflect shots', () => {
-  assert.equal(simulateShot({ dx: 0, dy: .34, duration: .32 },{x:.1,z:0}).feedback, 'Off the rim');
+  assert.equal(simulateShot({ dx: 0, dy: .39, duration: .32 },{x:.1,z:0}).feedback, 'Off the rim');
   const banks = [];
   for(let dy=.25;dy<=.65;dy+=.005) {
-    const shot = simulateShot({dx: .03,dy,duration:.32});
+    const shot = simulateShot({dx: .21,dy,duration:.32});
     if(shot.feedback==='Off the backboard')banks.push(shot);
   }
   assert.ok(banks.length > 0, 'some shots hit the backboard');
@@ -73,12 +74,18 @@ test('shots from nearby and sideways catch locations can reach the basket', () =
   }
 });
 
-test('friendly shot assistance forgives broader power and aim errors while large errors still miss',()=>{
-  const guide=shotGuide();
-  assert.ok(guide.maxSpeed-guide.minSpeed>1.2,'a broad scoring window rather than the previous 0.44 m/s interval');
-  for(const speed of [8.3,8.65,9.35]) {
-    const dy=.35,gesture={dx:.025,dy,duration:.32,velocity:(speed-3.8-dy*7)/2.3};
-    assert.equal(simulateShot(gesture).made,true,`power and aim error at ${speed} m/s still scores`);
+test('easy release assistance forgives gentle through quick flicks at different catch locations',()=>{
+  assert.ok(shotGuide().maxSpeed-shotGuide().minSpeed>6.9,'the starting scoring window is over five times wider');
+  for(const origin of [{x:0,z:6},{x:1,z:2},{x:.1,z:0},{x:0,z:1},{x:.1,z:1},{x:2,z:-.7},{x:3.8,z:7.5}]) {
+    const guide=shotGuide(origin);
+    assert.ok(guide.maxSpeed-guide.minSpeed>4.5,'a broad scoring window even at difficult catch locations');
+    for(const speed of [guide.minSpeed+.1,guide.minSpeed+.3,guide.speed,guide.maxSpeed-.1]) {
+      // Express any valid power, including low-power shots, as a real upward
+      // flick without a negative or out-of-range velocity.
+      const dy=Math.min(.35,(speed-3.8)/9),gesture={dx:dy*.28,dy,duration:.32,velocity:(speed-3.8-dy*7)/2.3};
+      assert.ok(validGesture(gesture));
+      assert.equal(simulateShot(gesture,origin).made,true,`power ${speed} and sideways drift still score at ${JSON.stringify(origin)}`);
+    }
   }
   assert.equal(simulateShot({dx:.15,dy:.35,duration:.32}).made,false);
   assert.equal(simulateShot({dx:0,dy:.85,duration:.08}).made,false);
