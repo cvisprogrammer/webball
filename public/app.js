@@ -1,4 +1,4 @@
-import { reboundPosition, reboundDuration, simulateShot, validGesture, sampleFrames, project, reboundWorld, START_POSITION, courtPosition, shotSpeed, shotGuide, shotOnTarget, MAX_SHOT_SPEED, MIN_SWIPE_DISTANCE, netResponse } from './physics.js';
+import { reboundPosition, reboundDuration, simulateShot, validGesture, sampleFrames, project, reboundWorld, START_POSITION, courtPosition, shotSpeed, shotGuide, shotOnTarget, shotValue, MAX_SHOT_SPEED, MIN_SWIPE_DISTANCE, netResponse } from './physics.js';
 import { createCourt, pointerPosition } from './court3d.js';
 import { createPractice, practiceAction } from './practice.js';
 import { createSwipe, moveSwipe, swipeGesture } from './swipe.js';
@@ -44,7 +44,8 @@ function render() {
   document.querySelector('.versus').textContent=game.solo?'·':'VS';
   const yours = game.turn === game.seat;
   updateRangeGuide();
-  $('shot-location').textContent = `${Math.hypot(playerPosition().x,playerPosition().z).toFixed(1)} m from the hoop · your rebound sets your next shot`;
+  const value=shotValue(playerPosition());
+  $('shot-location').textContent = `${Math.hypot(playerPosition().x,playerPosition().z).toFixed(1)} m from the hoop · ${value===2 ? 'foul line · 2 points' : '1 point'} · baskets return you to the foul line`;
   $('turn-label').textContent = game.solo ? 'SOLO · FIND YOUR TOUCH' : game.phase === 'waiting' ? 'INVITE YOUR TEAMMATE' : yours ? 'YOUR TURN' : 'SAVED · WAITING FOR PLAYER';
   $('invite-row').hidden = !game.invite;
   if (game.invite) $('invite').value = `${location.origin}/#game=${game.id}&invite=${game.invite}`;
@@ -55,7 +56,7 @@ function render() {
   $('status').textContent = game.solo ? (game.phase==='rebound' ? playback ? 'Chase your rebound.' : 'Your rebound is waiting.' : 'The court is yours.') : game.phase === 'waiting' ? 'Good games need two.' :
     game.phase === 'rebound' ? (yours ? playback ? 'Get that rebound!' : 'A rebound is waiting for you.' : 'Your miss is saved.') :
     yours ? 'Make it count.' : `${game.players[game.turn]} is up next.`;
-  $('instruction').textContent = game.solo && game.phase==='rebound' ? (playback ? 'Tap your moving ball to catch it. Your next shot starts right where you catch it.' : 'Replay the rebound, or return to the starting spot.') : game.phase === 'waiting' ? 'Share the link below. You’ll take the first shot when they join.' :
+  $('instruction').textContent = game.solo && game.phase==='rebound' ? (playback ? 'Tap your moving ball to catch it. Your next shot starts right where you catch it.' : 'Replay the rebound, or return to the foul line.') : game.phase === 'waiting' ? 'Share the link below. You’ll take the first shot when they join.' :
     game.phase === 'rebound' ? (yours ? 'The saved bounce starts when you’re ready. Catch it to shoot from that spot.' : 'The other player can catch this bounce whenever they return.') :
     yours ? `Press the ball, drag upward, then release. Short flicks for close shots; longer swipes from farther away.${game.solo?' Warm up solo or invite a friend.':''}` : 'You can leave and come back. This game stays right here.';
 }
@@ -103,7 +104,7 @@ $('practice').onclick = () => {
   if(busy)return;cancelInteractions();game=practice;history.replaceState(null,'','/');message('');render();
 };
 $('reset-position').onclick = async () => {
-  if(busy)return;cancelInteractions();await action({action:'reset'});message('Back at the starting spot.');
+  if(busy)return;cancelInteractions();await action({action:'reset'});message('Back at the foul line.');
 };
 $('copy').onclick = async () => {
   try { await navigator.clipboard.writeText($('invite').value); message('Invite copied. Send it to your teammate.'); }
@@ -192,7 +193,7 @@ function draw() {
     position=sampleFrames(shot.trajectory.flight,elapsed);focus=position;
     if(elapsed>=shot.trajectory.flightDuration) {
       const made=shot.trajectory.made;
-      message(made?'Bucket! Two points.':game.solo ? `${shot.trajectory.feedback}. Tap your rebound or return to the starting spot.` : `${shot.trajectory.feedback}. Rebound saved for the other player.`);
+      message(made?`Bucket! ${shot.trajectory.points} ${shot.trajectory.points===1 ? 'point' : 'points'}. Back to the foul line.`:game.solo ? `${shot.trajectory.feedback}. Tap your rebound or return to the foul line.` : `${shot.trajectory.feedback}. Rebound saved for the other player.`);
       $('shot-feedback').textContent=shot.trajectory.feedback;
       shot=null;
       if(game.solo && !made){practiceAction(game,{action:'start'});playback={start:performance.now(),trajectory:game.trajectory};}

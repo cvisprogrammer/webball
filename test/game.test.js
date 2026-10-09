@@ -4,7 +4,7 @@ import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createGameServer } from '../server.js';
-import { reboundPosition, reboundWorld, courtPosition } from '../public/physics.js';
+import { reboundPosition, reboundWorld, courtPosition, START_POSITION } from '../public/physics.js';
 
 test('two players shoot, save an offline rebound, resume after restart and catch it', async () => {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'webball-test-'));
@@ -40,8 +40,29 @@ test('two players shoot, save an offline rebound, resume after restart and catch
     const action = async (cookie, body) => request(`/api/action?id=${id}`, { version: state.version, ...body }, cookie);
     assert.equal((await action(p1, { action: 'shoot', gesture: { dx: 0, dy: .35, duration: .175 } })).status, 409);
     assert.equal((await action(p0, { action: 'shoot', gesture: { dx: 0, dy: .35, duration: .175, velocity: null } })).status, 400);
-    state = (await action(p0, { action: 'shoot', gesture: { dx: 0, dy: .35, duration: .175, velocity: .35/.175 } })).data;
+    const foulShot={dx:0,dy:.22,duration:.088,velocity:2.5};
+    state = (await action(p0, { action: 'shoot', gesture: foulShot })).data;
     assert.deepEqual(state.scores, [2, 0]); assert.equal(state.turn, 1);
+    assert.deepEqual(state.positions,[START_POSITION,START_POSITION]);
+    // Resume a match whose next shooter caught a rebound near the hoop.
+    await new Promise(resolve=>server.close(resolve));
+    const scoringFile=path.join(dataDir,'games.json'),scoringState=JSON.parse(await readFile(scoringFile,'utf8'));
+    scoringState[id].positions=[{x:.5,z:2},{x:0,z:1}];
+    await writeFile(scoringFile,JSON.stringify(scoringState));
+    await start();
+    state=(await request(`/api/game?id=${id}`,null,p1)).data;
+    state=(await action(p1,{action:'shoot',gesture:{dx:0,dy:.18,duration:.072,velocity:2.5},points:2,origin:START_POSITION})).data;
+    assert.deepEqual(state.scores,[2,1],'the server scores the actual catch location instead of a requested foul-line origin or point value');
+    assert.equal(state.turn,0);assert.equal(state.phase,'shoot');
+    assert.deepEqual(state.positions,[START_POSITION,START_POSITION],'both players return to the foul line after a basket');
+    assert.equal(state.trajectory,null);assert.equal(state.startedAt,null);
+    await new Promise(resolve=>server.close(resolve));
+    await start();
+    state=(await request(`/api/game?id=${id}`,null,p0)).data;
+    assert.deepEqual(state.scores,[2,1]);assert.deepEqual(state.positions,[START_POSITION,START_POSITION]);
+    state=(await action(p0,{action:'shoot',gesture:foulShot})).data;
+    assert.deepEqual(state.scores,[4,1],'the next turn is a two-point foul-line attempt');
+    assert.equal(state.turn,1);
     const staleVersion = state.version;
     state = (await action(p1, { action: 'shoot', gesture: { dx: 0, dy: .025, duration: .5, velocity: .05 } })).data;
     assert.equal(state.phase, 'rebound'); assert.equal(state.turn, 0);

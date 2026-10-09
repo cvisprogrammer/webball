@@ -1,4 +1,4 @@
-import { BALL_RADIUS, HOOP, NET_LENGTH, START_POSITION, cameraPose, project, netResponse, netPoint } from './physics.js';
+import { BALL_RADIUS, HOOP, NET_LENGTH, START_POSITION, FOUL_LINE, cameraPose, project, netResponse, netPoint } from './physics.js';
 const W = 700, H = 650;
 
 // A separate canvas remains usable when the original WebGL context is lost.
@@ -54,8 +54,8 @@ export function createLightCourt(canvas) {
     polygon([point(-1.22, .02, -1.2), point(1.22, .02, -1.2), point(1.22, .02, 3), point(-1.22, .02, 3)], '#315e4c');
     for (const x of [-3.8, 3.8]) line(point(x, .03, -1.2), point(x, .03, 7.5));
     for (const z of [-1.2, 7.5]) line(point(-3.8, .03, z), point(3.8, .03, z));
-    for (const x of [-1.22, 1.22]) line(point(x, .03, -1.2), point(x, .03, 3));
-    line(point(-1.22, .03, 3), point(1.22, .03, 3));
+    for (const x of [-FOUL_LINE.halfWidth, FOUL_LINE.halfWidth]) line(point(x, .03, -1.2), point(x, .03, FOUL_LINE.z));
+    line(point(-FOUL_LINE.halfWidth, .03, FOUL_LINE.z), point(FOUL_LINE.halfWidth, .03, FOUL_LINE.z));
     line(point(0, 0, -.9), point(0, 3.7, -.9), '#9aa79a', 5);
     const board = [point(-.92, 2.55, -.45), point(.92, 2.55, -.45), point(.92, 3.85, -.45), point(-.92, 3.85, -.45)];
     polygon(board, '#d6e5d02b'); board.forEach((p, i) => line(p, board[(i + 1) % 4]));

@@ -1,5 +1,5 @@
 import * as THREE from '/vendor/three.module.js';
-import { cameraPose, BALL_RADIUS, START_POSITION, HOOP, NET_LENGTH, netResponse } from './physics.js';
+import { cameraPose, BALL_RADIUS, START_POSITION, FOUL_LINE, HOOP, NET_LENGTH, netResponse } from './physics.js';
 const W=700,H=650;
 export function pointerPosition(canvas,event) {
   const r=canvas.getBoundingClientRect(),scale=Math.min(r.width/W,r.height/H);
@@ -44,8 +44,8 @@ export function createCourt(canvas, { onContextLost = () => {}, onContextRestore
   const paint=mesh(new THREE.PlaneGeometry(2.44,4.2),mat('#244d42',{roughness:.72}),0,.008,.9,false);paint.rotation.x=-Math.PI/2;
   const boundary=[[-3.8,.02,-1.2],[3.8,.02,-1.2],[3.8,.02,7.5],[-3.8,.02,7.5],[-3.8,.02,-1.2]];
   tube(boundary,.014,mat('#f1e7d0'));
-  tube([[-1.22,.02,-1.2],[-1.22,.02,3],[1.22,.02,3],[1.22,.02,-1.2]],.014,mat('#f1e7d0'));
-  arc(0,3,1.22,0,Math.PI);arc(0,0,4.1,0,Math.PI);arc(0,0,.6,0,Math.PI);
+  tube([[-FOUL_LINE.halfWidth,.02,-1.2],[-FOUL_LINE.halfWidth,.02,FOUL_LINE.z],[FOUL_LINE.halfWidth,.02,FOUL_LINE.z],[FOUL_LINE.halfWidth,.02,-1.2]],.014,mat('#f1e7d0'));
+  arc(0,FOUL_LINE.z,FOUL_LINE.halfWidth,0,Math.PI);arc(0,0,4.1,0,Math.PI);arc(0,0,.6,0,Math.PI);
   const wall=mat('#3a4848',{roughness:.95});
   mesh(new THREE.BoxGeometry(12,6,.25),wall,0,3,-2.2);mesh(new THREE.BoxGeometry(.25,6,16),wall,-6,3,3);mesh(new THREE.BoxGeometry(.25,6,16),wall,6,3,3);
   mesh(new THREE.BoxGeometry(12,.15,16),wall,0,7.6,3,false);
@@ -96,7 +96,7 @@ export function createCourt(canvas, { onContextLost = () => {}, onContextRestore
     renderer.shadowMap.enabled=false;renderer.setPixelRatio(1);canvas.dataset.renderer='webgl';onContextRestored();
   });
   let previousNet=null;
-  return function draw({position={x:0,y:1.6,z:6},player=START_POSITION,focus=null,netState=netResponse(null,0),time=0,ready=false,moving=false}={}) {
+  return function draw({position={...START_POSITION,y:1.6},player=START_POSITION,focus=null,netState=netResponse(null,0),time=0,ready=false,moving=false}={}) {
     if(lost || (mobile && moving && time-lastRender<1000/30))return;
     const bounds=canvas.getBoundingClientRect();
     const width=Math.round(Math.min(bounds.width||W,(bounds.height||H)*W/H,W));

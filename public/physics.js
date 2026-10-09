@@ -3,13 +3,19 @@ export const BALL_RADIUS = .12;
 export const HOOP = { x: 0, y: 3.05, z: 0, radius: .23 };
 export const NET_LENGTH = .42;
 const clamp = (v, low, high) => Math.max(low, Math.min(high, v));
-export const START_POSITION = { x: 0, z: 6 };
+export const FOUL_LINE = { z: 3, halfWidth: 1.22 };
+export const START_POSITION = { x: 0, z: FOUL_LINE.z };
 export const COURT_BOUNDS = { minX: -3.8, maxX: 3.8, minZ: -.75, maxZ: 7.5, maxY: 7.35 };
 export const SHOT_ASSIST_RADIUS = .65;
 export const MIN_SWIPE_DISTANCE = .01;
 export function courtPosition(position = START_POSITION) {
   return { x: clamp(Number.isFinite(position?.x) ? position.x : START_POSITION.x, COURT_BOUNDS.minX, COURT_BOUNDS.maxX),
     z: clamp(Number.isFinite(position?.z) ? position.z : START_POSITION.z, COURT_BOUNDS.minZ, COURT_BOUNDS.maxZ) };
+}
+export function shotValue(position = START_POSITION) {
+  const {x,z}=courtPosition(position);
+  // Count feet within 15 cm of the painted line, across the lane's width.
+  return Math.abs(z-FOUL_LINE.z)<=.15+1e-9 && Math.abs(x)<=FOUL_LINE.halfWidth+1e-9 ? 2 : 1;
 }
 export const MAX_SHOT_SPEED = 17;
 const swipeVelocity = gesture => gesture.velocity ?? gesture.dy / Math.max(.008,gesture.duration);
@@ -196,7 +202,7 @@ function simulate(gesture, origin, savePath, physicalSpeed = null) {
   const start = sampleFrames(frames, split * 1000);
   const rebound = [[0, start.x, start.y, start.z], ...frames.filter(f => f[0] > split).map(f => [f[0] - split, ...f.slice(1)])];
   const flight = [...frames.filter(f => f[0] < split), [split, start.x, start.y, start.z]];
-  return { version: 10, launchSpeed:speed, netImpact, frames: rebound, flight: made ? frames.filter(f => f[0] <= 3) : flight,
+  return { version: 11, points:made ? shotValue(origin) : 0, launchSpeed:speed, netImpact, frames: rebound, flight: made ? frames.filter(f => f[0] <= 3) : flight,
     duration: rebound.at(-1)[0] * 1000, flightDuration: made ? 3000 : split * 1000, made, feedback, gesture, origin: {x:origin.x,z:origin.z} };
 }
 

@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { createSwipe, moveSwipe, swipeGesture } from '../public/swipe.js';
 import { shotSpeed, simulateShot, validGesture } from '../public/physics.js';
 
+const FAR={x:0,z:6};
+
 test('a steady flick uses its measured velocity and the guide matches its release',()=>{
   const swipe=createSwipe({x:.5,y:.8},0,1);
   for(let time=25;time<=175;time+=25)moveSwipe(swipe,{x:.5,y:.8-.35*time/175},time);
@@ -11,7 +13,7 @@ test('a steady flick uses its measured velocity and the guide matches its releas
   const release=swipeGesture(swipe,175);
   assert.ok(Math.abs(preview.velocity-.35/.175)<1e-9);
   assert.equal(shotSpeed(preview),shotSpeed(release));
-  assert.equal(simulateShot(release).made,true);
+  assert.equal(simulateShot(release,FAR).made,true);
 });
 
 test('continuing the same-speed swipe adds travel even beyond the velocity sampling window',()=>{
@@ -27,8 +29,8 @@ test('continuing the same-speed swipe adds travel even beyond the velocity sampl
   assert.ok(Math.abs(short.dy-.18)<1e-9 && Math.abs(long.dy-.32)<1e-9,'the full upward stroke is retained');
   assert.ok(shotSpeed(long)>shotSpeed(short),'continuing the stroke increases power');
   assert.equal(simulateShot(short,{x:0,z:1}).made,true);
-  assert.equal(simulateShot(short).made,false);
-  assert.equal(simulateShot(long).made,true);
+  assert.equal(simulateShot(short,FAR).made,false);
+  assert.equal(simulateShot(long,FAR).made,true);
 });
 
 test('a very gentle short drag and a flick after holding both release',()=>{
@@ -36,12 +38,12 @@ test('a very gentle short drag and a flick after holding both release',()=>{
   moveSwipe(soft,{x:.5,y:.79},200);
   moveSwipe(soft,{x:.5,y:.78},400);
   const release=swipeGesture(soft,432);
-  assert.equal(validGesture(release),true);assert.equal(simulateShot(release).made,false);
+  assert.equal(validGesture(release),true);assert.equal(simulateShot(release,FAR).made,false);
   const held=createSwipe({x:.5,y:.8},0,1);
   for(let i=0;i<=7;i++)moveSwipe(held,{x:.5,y:.8-.35*i/7},3000+i*25);
   const flick=swipeGesture(held,3207);
   assert.ok(flick.duration>3);assert.equal(validGesture(flick),true);
-  assert.equal(simulateShot(flick).made,true,'waiting before a real flick does not reject it');
+  assert.equal(simulateShot(flick,FAR).made,true,'waiting before a real flick does not reject it');
 });
 
 test('the recent flick controls velocity even after an initial slow drag or hold',()=>{
@@ -80,7 +82,7 @@ test('lifting a finger briefly after a scoring flick keeps the previewed velocit
     moveSwipe(swipe,{...swipe.to},175+gap);
     const release=swipeGesture(swipe,175+gap);
     assert.equal(shotSpeed(release),power,'release launches with the same previewed velocity');
-    assert.equal(simulateShot(release).made,true,'the normal lift-off gap does not turn a good swipe into a miss');
-    assert.deepEqual(simulateShot(release).flight,simulateShot(preview).flight);
+    assert.equal(simulateShot(release,FAR).made,true,'the normal lift-off gap does not turn a good swipe into a miss');
+    assert.deepEqual(simulateShot(release,FAR).flight,simulateShot(preview,FAR).flight);
   }
 });

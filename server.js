@@ -86,7 +86,11 @@ export async function createGameServer({ dataDir = path.join(root, '.data'), now
         if (body.action === 'shoot' && game.phase === 'shoot') {
           if (!validGesture(body.gesture)) throw fail(400, 'Swipe upward from the ball to shoot');
           const trajectory = simulateShot(body.gesture, game.positions[seat]);
-          if (trajectory.made) { game.scores[seat] += 2; game.turn = 1 - seat; }
+          if (trajectory.made) {
+            game.scores[seat] += trajectory.points; game.turn = 1 - seat;
+            game.positions = [{...START_POSITION},{...START_POSITION}];
+            game.trajectory = null; game.startedAt = null;
+          }
           else {
             game.trajectory = trajectory;
             game.turn = 1 - seat; game.phase = 'rebound'; game.startedAt = null;

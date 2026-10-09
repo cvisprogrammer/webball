@@ -13,7 +13,10 @@ export function practiceAction(game,body,now=Date.now()) {
     if(!validGesture(body.gesture))throw new Error('Press the ball, drag upward, then release to shoot.');
     const trajectory=simulateShot(body.gesture,game.positions[0]);
     game.attempts++;
-    if(trajectory.made){game.scores[0]+=2;game.baskets++;}
+    if(trajectory.made){
+      game.scores[0]+=trajectory.points;game.baskets++;
+      game.positions[0]={...START_POSITION};game.trajectory=null;game.startedAt=null;
+    }
     else{game.phase='rebound';game.trajectory=trajectory;game.startedAt=null;}
   } else if(body.action==='start' && game.phase==='rebound') {
     game.startedAt=now;
