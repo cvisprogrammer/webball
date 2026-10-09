@@ -7,13 +7,41 @@ export const START_POSITION = { x: 0, z: 6 };
 export const COURT_BOUNDS = { minX: -3.8, maxX: 3.8, minZ: -.75, maxZ: 7.5, maxY: 7.35 };
 export const SHOT_ASSIST_RADIUS = .65;
 export const MIN_SWIPE_DISTANCE = .01;
+export const TARGET_SWIPE_VELOCITY = 1.1;
 export function courtPosition(position = START_POSITION) {
   return { x: clamp(Number.isFinite(position?.x) ? position.x : START_POSITION.x, COURT_BOUNDS.minX, COURT_BOUNDS.maxX),
     z: clamp(Number.isFinite(position?.z) ? position.z : START_POSITION.z, COURT_BOUNDS.minZ, COURT_BOUNDS.maxZ) };
 }
 export const MAX_SHOT_SPEED = 17;
 export const shotSpeed = gesture => clamp(1.2 + (gesture.velocity ?? gesture.dy / Math.max(.008,gesture.duration)) * 7, 1.2, MAX_SHOT_SPEED);
-const launchAngle = distance => distance < .11 ? Math.PI/2 : Math.atan2(1.45+1.358*distance,distance);
+const swipeVelocity = gesture => gesture.velocity ?? gesture.dy / Math.max(.008,gesture.duration);
+function launchModel(origin) {
+  const distance=Math.hypot(origin.x,origin.z),underHoop=distance<=.85;
+  // A layup includes reaching up from the caught standing position. This
+  // clears the underside of the rim without moving the player's feet.
+  const height=underHoop ? 2.1 : 1.6;
+  let apex=underHoop ? 3.65 : 3.9+Math.max(0,distance-2)*.18;
+  // A rebound can leave the player behind the board. Choose an arc that
+  // passes below or above it instead of sending every layup into its back.
+  if(!underHoop && origin.z<-.57 && Math.abs(origin.x*.57/origin.z)<1.03) {
+    const fraction=1-.57/Math.abs(origin.z);
+    const boardHeight=peak=>{
+      const v=Math.sqrt(2*9.81*(peak-height));
+      const t=(v+Math.sqrt(2*9.81*(peak-HOOP.y)))/9.81*fraction;
+      return height+v*t-9.81*t*t/2;
+    };
+    const crossed=boardHeight(apex);
+    if(crossed>2.4 && crossed<4) {
+      const clear=[3.5,4.8,5.4,6.2,7].find(peak=>{const y=boardHeight(peak);return y<=2.4 || y>=4;});
+      if(clear)apex=clear;
+    }
+  }
+  const vertical=Math.sqrt(2*9.81*(apex-height));
+  const time=(vertical+Math.sqrt(2*9.81*(apex-HOOP.y)))/9.81;
+  const flat=underHoop ? 0 : distance/time;
+  return {distance,underHoop,height,carryDuration:underHoop ? .18 : 0,
+    angle:Math.atan2(vertical,flat),estimate:Math.hypot(vertical,flat)};
+}
 export function cameraPose(player = START_POSITION, focus = null) {
   player = courtPosition(player);
   const distance = Math.hypot(player.x, player.z) || 1;
@@ -74,23 +102,31 @@ export function simulateShot(gesture, origin = START_POSITION) {
 export function shotOnTarget(gesture, origin = START_POSITION) {
   return !!validGesture(gesture) && simulate(gesture, courtPosition(origin), false).made;
 }
-function simulate(gesture, origin, savePath) {
+function simulate(gesture, origin, savePath, physicalSpeed = null) {
   if (!validGesture(gesture)) throw new Error('Swipe upward from the ball to shoot');
-  const speed = shotSpeed(gesture);
-  const distance = Math.hypot(origin.x,origin.z);
+  const model=launchModel(origin),distance=model.distance;
+  const speed = physicalSpeed ?? launchSpeed(gesture,origin);
   const forward = {x:-origin.x/(distance||1),z:-origin.z/(distance||1)};
   if(origin.x===0 && origin.z===0)forward.z=-1;
   // Aim follows the actual swipe angle, including small deviations.
   const side=clamp(gesture.dx/gesture.dy,-1.5,1.5);
-  const angle=launchAngle(distance);
-  const flat=speed*Math.cos(angle);
+  const flat=model.underHoop ? 0 : speed*Math.cos(model.angle);
   let vx=flat*(forward.x-side*forward.z), vz=flat*(forward.z+side*forward.x);
-  let vy = speed * Math.sin(angle);
-  let x = origin.x, y = 1.6, z = origin.z, made = false, contact = null, feedback = 'Air ball', shotLive = true, assisted = false, netImpact = null, netExited = false;
-  const frames = savePath ? [[0, x, y, z]] : null, dt = 1 / 120;
+  let vy = speed * Math.sin(model.angle);
+  let x = model.underHoop ? -side*forward.z*.25 : origin.x;
+  let z = model.underHoop ? side*forward.x*.25 : origin.z;
+  let y = model.height, made = false, contact = null, feedback = 'Air ball', shotLive = true, assisted = false, netImpact = null, netExited = false;
+  const frames = savePath ? [[0, origin.x, 1.6, origin.z]] : null, dt = 1 / 120;
+  if(savePath && model.carryDuration) {
+    for(let t=.025;t<model.carryDuration;t+=.025) {
+      const f=Math.sin(t/model.carryDuration*Math.PI/2);
+      frames.push([t,origin.x+(x-origin.x)*f,1.6+(y-1.6)*f,origin.z+(z-origin.z)*f]);
+    }
+    frames.push([model.carryDuration,x,y,z]);
+  }
   const impact = (time, kind) => { if (contact === null && !made) { contact = time; feedback = kind; } };
   for (let step = 1; step <= 1440; step++) {
-    const time = step * dt, previousX = x, previousY = y, previousZ = z;
+    const time = model.carryDuration+step * dt, previousX = x, previousY = y, previousZ = z;
     vy -= 9.81 * dt;
     vx *= 1 - .025 * dt; vz *= 1 - .025 * dt;
     x += vx * dt; y += vy * dt; z += vz * dt;
@@ -153,31 +189,30 @@ function simulate(gesture, origin, savePath) {
   const start = sampleFrames(frames, split * 1000);
   const rebound = [[0, start.x, start.y, start.z], ...frames.filter(f => f[0] > split).map(f => [f[0] - split, ...f.slice(1)])];
   const flight = [...frames.filter(f => f[0] < split), [split, start.x, start.y, start.z]];
-  return { version: 8, netImpact, frames: rebound, flight: made ? frames.filter(f => f[0] <= 3) : flight,
+  return { version: 9, launchSpeed:speed, netImpact, frames: rebound, flight: made ? frames.filter(f => f[0] <= 3) : flight,
     duration: rebound.at(-1)[0] * 1000, flightDuration: made ? 3000 : split * 1000, made, feedback, gesture, origin: {x:origin.x,z:origin.z} };
 }
 
-const guideCache = new Map();
-export function shotGuide(origin = START_POSITION) {
+const calibrationCache = new Map();
+function shotCalibration(origin) {
   origin = courtPosition(origin);
   const key=`${origin.x},${origin.z}`;
-  if(guideCache.has(key))return guideCache.get(key);
-  const distance=Math.hypot(origin.x,origin.z),angle=launchAngle(distance);
-  const estimate=distance<.11 ? 6 : Math.sqrt(9.81*distance*distance/(2*Math.cos(angle)**2*(distance*Math.tan(angle)-1.45)));
+  if(calibrationCache.has(key))return calibrationCache.get(key);
+  const model=launchModel(origin);
   // Find a successful release interval in the actual simulation,
   // including its gravity, air drag, rim and backboard collisions.
-  const makes = speed => speed>=5 && speed<=15.8 && simulate({dx:0,dy:(speed-1.2)/7*.32,duration:.32},origin,false).made;
+  const makes = speed => speed>=3.5 && speed<=15.8 && simulate({dx:0,dy:.35,duration:.32},origin,false,speed).made;
   let best=null;
   function search(low,high,step) {
     let band=null;
-    for(let speed=Math.max(5,low);speed<=Math.min(15.8,high)+1e-9;speed+=step) {
+    for(let speed=Math.max(3.5,low);speed<=Math.min(15.8,high)+1e-9;speed+=step) {
       if(makes(speed)) {
         band ||= {minSpeed:speed,maxSpeed:speed};band.maxSpeed=speed;
         if(!best || band.maxSpeed-band.minSpeed > best.maxSpeed-best.minSpeed)best={...band};
       } else band=null;
     }
   }
-  search(5,15.8,.025);
+  search(3.5,15.8,.025);
   // Near the underside of the rim, small collision changes can separate
   // successful powers. Resolve those bands finely instead of bridging gaps.
   let precision=.002;
@@ -191,9 +226,31 @@ export function shotGuide(origin = START_POSITION) {
     for(let i=0;i<5 && makes(best.minSpeed-precision);i++)best.minSpeed-=precision;
     for(let i=0;i<5 && makes(best.maxSpeed+precision);i++)best.maxSpeed+=precision;
   }
-  const speed=best?(best.minSpeed+best.maxSpeed)/2:clamp(estimate,5,15.8);
-  const guide={speed:best && !makes(speed)?best.minSpeed:speed,minSpeed:best?.minSpeed??speed,maxSpeed:best?.maxSpeed??speed,reachable:!!best};
-  if(guideCache.size>200)guideCache.clear();guideCache.set(key,guide);return guide;
+  let speed=best ? clamp(model.estimate,best.minSpeed+(best.maxSpeed-best.minSpeed)*.1,best.maxSpeed-(best.maxSpeed-best.minSpeed)*.1) : model.estimate;
+  if(best && !makes(speed))speed=(best.minSpeed+best.maxSpeed)/2;
+  // Close releases get a generous effort interval; it blends into a precise
+  // jump-shot interval by five metres. Outside that interval power still rises
+  // normally, so very weak and hard flicks remain genuine physical misses.
+  const blend=clamp((model.distance-2)/3,0,1),smooth=blend*blend*(3-2*blend);
+  const tolerance=TARGET_SWIPE_VELOCITY*(.25-.19*smooth);
+  const halfWindow=best ? Math.max(.000001,Math.min(speed-best.minSpeed,best.maxSpeed-speed)*.9) : .1;
+  const calibration={speed,minSpeed:best?.minSpeed??speed,maxSpeed:best?.maxSpeed??speed,
+    response:halfWindow/tolerance,tolerance,reachable:!!best};
+  if(calibrationCache.size>200)calibrationCache.clear();calibrationCache.set(key,calibration);return calibration;
+}
+function launchSpeed(gesture,origin) {
+  const c=shotCalibration(origin),error=swipeVelocity(gesture)-TARGET_SWIPE_VELOCITY;
+  const central=clamp(error,-c.tolerance,c.tolerance);
+  return clamp(c.speed+central*c.response+(error-central)*7,1.2,MAX_SHOT_SPEED);
+}
+export function shotGuide(origin = START_POSITION) {
+  const c=shotCalibration(origin);
+  const powerAt = speed => {
+    const delta=speed-c.speed,inner=c.tolerance*c.response;
+    const error=Math.abs(delta)<=inner ? delta/c.response : Math.sign(delta)*(c.tolerance+(Math.abs(delta)-inner)/7);
+    return clamp(1.2+7*(TARGET_SWIPE_VELOCITY+error),1.2,MAX_SHOT_SPEED);
+  };
+  return {speed:1.2+7*TARGET_SWIPE_VELOCITY,minSpeed:powerAt(c.minSpeed),maxSpeed:powerAt(c.maxSpeed),reachable:c.reachable};
 }
 
 // The recorded crossing drives both renderers without restarting the motion

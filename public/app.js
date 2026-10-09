@@ -1,4 +1,4 @@
-import { reboundPosition, reboundDuration, simulateShot, validGesture, sampleFrames, project, reboundWorld, START_POSITION, courtPosition, shotSpeed, shotGuide, shotOnTarget, MAX_SHOT_SPEED, MIN_SWIPE_DISTANCE, netResponse } from './physics.js';
+import { reboundPosition, reboundDuration, simulateShot, validGesture, sampleFrames, project, reboundWorld, START_POSITION, courtPosition, shotSpeed, shotGuide, shotOnTarget, MAX_SHOT_SPEED, MIN_SWIPE_DISTANCE, TARGET_SWIPE_VELOCITY, netResponse } from './physics.js';
 import { createCourt, pointerPosition } from './court3d.js';
 import { createPractice, practiceAction } from './practice.js';
 import { createSwipe, moveSwipe, swipeGesture } from './swipe.js';
@@ -170,6 +170,7 @@ function updateRangeGuide(time=performance.now()) {
   const gesture=swipe ? swipeGesture(swipe,time) : null;
   const speed=gesture && gesture.dy>0 ? shotSpeed(gesture) : 0;
   const distance=Math.hypot(player.x,player.z);
+  display.querySelector('.range-title').textContent=distance<=2 ? 'LAYUP' : 'RANGE';
   const inRange=speed>=guide.minSpeed && speed<=guide.maxSpeed;
   const aligned=gesture && inRange && guide.reachable && shotOnTarget(gesture,player);
   display.style.setProperty('--target-level',`${guide.speed/MAX_SHOT_SPEED*100}%`);
@@ -180,7 +181,7 @@ function updateRangeGuide(time=performance.now()) {
   $('range-distance').textContent=`${distance.toFixed(1)} m`;
   $('range-status').textContent=!gesture ? 'Hold ball' : gesture.dy<MIN_SWIPE_DISTANCE ? 'Move upward' : aligned ? 'On target' : inRange ? 'Aim straight' : speed>guide.maxSpeed ? 'Swipe slower' : 'Swipe faster';
   $('power').value=speed;
-  $('power').setAttribute('aria-valuetext',`${speed.toFixed(1)} meters per second; target ${guide.speed.toFixed(1)}`);
+  $('power').setAttribute('aria-valuetext',`${(gesture?.velocity??0).toFixed(2)} court heights per second; target ${TARGET_SWIPE_VELOCITY.toFixed(2)}`);
 }
 function draw() {
   let player=playerPosition(),position={x:player.x,y:1.6,z:player.z},focus=null,netState=netResponse(null,0);
