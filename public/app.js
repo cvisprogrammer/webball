@@ -1,4 +1,4 @@
-import { reboundPosition, reboundDuration, simulateShot, validGesture, sampleFrames, project, reboundWorld, START_POSITION, courtPosition, shotSpeed, shotGuide, shotOnTarget, MAX_SHOT_SPEED, MIN_SWIPE_DISTANCE, TARGET_SWIPE_VELOCITY, netResponse } from './physics.js';
+import { reboundPosition, reboundDuration, simulateShot, validGesture, sampleFrames, project, reboundWorld, START_POSITION, courtPosition, shotSpeed, shotGuide, shotOnTarget, MAX_SHOT_SPEED, MIN_SWIPE_DISTANCE, netResponse } from './physics.js';
 import { createCourt, pointerPosition } from './court3d.js';
 import { createPractice, practiceAction } from './practice.js';
 import { createSwipe, moveSwipe, swipeGesture } from './swipe.js';
@@ -57,7 +57,7 @@ function render() {
     yours ? 'Make it count.' : `${game.players[game.turn]} is up next.`;
   $('instruction').textContent = game.solo && game.phase==='rebound' ? (playback ? 'Tap your moving ball to catch it. Your next shot starts right where you catch it.' : 'Replay the rebound, or return to the starting spot.') : game.phase === 'waiting' ? 'Share the link below. You’ll take the first shot when they join.' :
     game.phase === 'rebound' ? (yours ? 'The saved bounce starts when you’re ready. Catch it to shoot from that spot.' : 'The other player can catch this bounce whenever they return.') :
-    yours ? `Press the ball, drag upward, then release. Faster flicks go farther.${game.solo?' Warm up solo or invite a friend.':''}` : 'You can leave and come back. This game stays right here.';
+    yours ? `Press the ball, drag upward, then release. Short flicks for close shots; longer swipes from farther away.${game.solo?' Warm up solo or invite a friend.':''}` : 'You can leave and come back. This game stays right here.';
 }
 async function refresh() {
   if (!id || game.solo || busy || shot || playback) return;
@@ -179,9 +179,9 @@ function updateRangeGuide(time=performance.now()) {
   display.style.setProperty('--power-level',`${speed/MAX_SHOT_SPEED*100}%`);
   display.classList.toggle('aligned',!!aligned);
   $('range-distance').textContent=`${distance.toFixed(1)} m`;
-  $('range-status').textContent=!gesture ? 'Hold ball' : gesture.dy<MIN_SWIPE_DISTANCE ? 'Move upward' : aligned ? 'On target' : inRange ? 'Aim straight' : speed>guide.maxSpeed ? 'Swipe slower' : 'Swipe faster';
+  $('range-status').textContent=!gesture ? 'Hold ball' : gesture.dy<MIN_SWIPE_DISTANCE ? 'Move upward' : aligned ? 'On target' : inRange ? 'Aim straight' : speed>guide.maxSpeed ? 'Shorter / slower' : 'Longer / faster';
   $('power').value=speed;
-  $('power').setAttribute('aria-valuetext',`${(gesture?.velocity??0).toFixed(2)} court heights per second; target ${TARGET_SWIPE_VELOCITY.toFixed(2)}`);
+  $('power').setAttribute('aria-valuetext',`${speed.toFixed(1)} meters per second; target ${guide.speed.toFixed(1)}`);
 }
 function draw() {
   let player=playerPosition(),position={x:player.x,y:1.6,z:player.z},focus=null,netState=netResponse(null,0);

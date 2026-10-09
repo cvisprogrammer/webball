@@ -7,14 +7,21 @@ export const START_POSITION = { x: 0, z: 6 };
 export const COURT_BOUNDS = { minX: -3.8, maxX: 3.8, minZ: -.75, maxZ: 7.5, maxY: 7.35 };
 export const SHOT_ASSIST_RADIUS = .65;
 export const MIN_SWIPE_DISTANCE = .01;
-export const TARGET_SWIPE_VELOCITY = 1.1;
 export function courtPosition(position = START_POSITION) {
   return { x: clamp(Number.isFinite(position?.x) ? position.x : START_POSITION.x, COURT_BOUNDS.minX, COURT_BOUNDS.maxX),
     z: clamp(Number.isFinite(position?.z) ? position.z : START_POSITION.z, COURT_BOUNDS.minZ, COURT_BOUNDS.maxZ) };
 }
 export const MAX_SHOT_SPEED = 17;
-export const shotSpeed = gesture => clamp(1.2 + (gesture.velocity ?? gesture.dy / Math.max(.008,gesture.duration)) * 7, 1.2, MAX_SHOT_SPEED);
 const swipeVelocity = gesture => gesture.velocity ?? gesture.dy / Math.max(.008,gesture.duration);
+export function shotSpeed(gesture) {
+  const velocity=Math.max(0,swipeVelocity(gesture));
+  // Work per unit mass is proportional to upward travel and a push inferred
+  // from release speed. The bounded push keeps everyday brisk flicks usable;
+  // extra travel still adds energy. Convert that work to kinetic energy:
+  // v_ball² = 2 * work / mass. This mapping is identical at every catch spot.
+  const push=velocity/(velocity+2);
+  return clamp(Math.sqrt(450*Math.max(0,gesture.dy)*push),0,MAX_SHOT_SPEED);
+}
 function launchModel(origin) {
   const distance=Math.hypot(origin.x,origin.z),underHoop=distance<=.85;
   // A layup includes reaching up from the caught standing position. This
@@ -105,12 +112,12 @@ export function shotOnTarget(gesture, origin = START_POSITION) {
 function simulate(gesture, origin, savePath, physicalSpeed = null) {
   if (!validGesture(gesture)) throw new Error('Swipe upward from the ball to shoot');
   const model=launchModel(origin),distance=model.distance;
-  const speed = physicalSpeed ?? launchSpeed(gesture,origin);
+  const speed = physicalSpeed ?? shotSpeed(gesture);
   const forward = {x:-origin.x/(distance||1),z:-origin.z/(distance||1)};
   if(origin.x===0 && origin.z===0)forward.z=-1;
   // Aim follows the actual swipe angle, including small deviations.
   const side=clamp(gesture.dx/gesture.dy,-1.5,1.5);
-  const flat=model.underHoop ? 0 : speed*Math.cos(model.angle);
+  const flat=model.underHoop ? 0 : speed*Math.cos(model.angle)/Math.hypot(1,side);
   let vx=flat*(forward.x-side*forward.z), vz=flat*(forward.z+side*forward.x);
   let vy = speed * Math.sin(model.angle);
   let x = model.underHoop ? -side*forward.z*.25 : origin.x;
@@ -189,7 +196,7 @@ function simulate(gesture, origin, savePath, physicalSpeed = null) {
   const start = sampleFrames(frames, split * 1000);
   const rebound = [[0, start.x, start.y, start.z], ...frames.filter(f => f[0] > split).map(f => [f[0] - split, ...f.slice(1)])];
   const flight = [...frames.filter(f => f[0] < split), [split, start.x, start.y, start.z]];
-  return { version: 9, launchSpeed:speed, netImpact, frames: rebound, flight: made ? frames.filter(f => f[0] <= 3) : flight,
+  return { version: 10, launchSpeed:speed, netImpact, frames: rebound, flight: made ? frames.filter(f => f[0] <= 3) : flight,
     duration: rebound.at(-1)[0] * 1000, flightDuration: made ? 3000 : split * 1000, made, feedback, gesture, origin: {x:origin.x,z:origin.z} };
 }
 
@@ -228,29 +235,12 @@ function shotCalibration(origin) {
   }
   let speed=best ? clamp(model.estimate,best.minSpeed+(best.maxSpeed-best.minSpeed)*.1,best.maxSpeed-(best.maxSpeed-best.minSpeed)*.1) : model.estimate;
   if(best && !makes(speed))speed=(best.minSpeed+best.maxSpeed)/2;
-  // Close releases get a generous effort interval; it blends into a precise
-  // jump-shot interval by five metres. Outside that interval power still rises
-  // normally, so very weak and hard flicks remain genuine physical misses.
-  const blend=clamp((model.distance-2)/3,0,1),smooth=blend*blend*(3-2*blend);
-  const tolerance=TARGET_SWIPE_VELOCITY*(.25-.19*smooth);
-  const halfWindow=best ? Math.max(.000001,Math.min(speed-best.minSpeed,best.maxSpeed-speed)*.9) : .1;
   const calibration={speed,minSpeed:best?.minSpeed??speed,maxSpeed:best?.maxSpeed??speed,
-    response:halfWindow/tolerance,tolerance,reachable:!!best};
+    reachable:!!best};
   if(calibrationCache.size>200)calibrationCache.clear();calibrationCache.set(key,calibration);return calibration;
 }
-function launchSpeed(gesture,origin) {
-  const c=shotCalibration(origin),error=swipeVelocity(gesture)-TARGET_SWIPE_VELOCITY;
-  const central=clamp(error,-c.tolerance,c.tolerance);
-  return clamp(c.speed+central*c.response+(error-central)*7,1.2,MAX_SHOT_SPEED);
-}
 export function shotGuide(origin = START_POSITION) {
-  const c=shotCalibration(origin);
-  const powerAt = speed => {
-    const delta=speed-c.speed,inner=c.tolerance*c.response;
-    const error=Math.abs(delta)<=inner ? delta/c.response : Math.sign(delta)*(c.tolerance+(Math.abs(delta)-inner)/7);
-    return clamp(1.2+7*(TARGET_SWIPE_VELOCITY+error),1.2,MAX_SHOT_SPEED);
-  };
-  return {speed:1.2+7*TARGET_SWIPE_VELOCITY,minSpeed:powerAt(c.minSpeed),maxSpeed:powerAt(c.maxSpeed),reachable:c.reachable};
+  return shotCalibration(origin);
 }
 
 // The recorded crossing drives both renderers without restarting the motion

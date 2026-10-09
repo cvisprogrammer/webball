@@ -1,5 +1,5 @@
-// Measure recent pointer motion in court heights per second. Both the guide
-// and the released shot use this sample; the meter never sets shot power.
+// Measure recent velocity and net upward travel in court-height units. Both
+// the guide and released shot use these inputs; the meter never sets power.
 const VELOCITY_WINDOW = 80;
 // Lifting a finger/button often adds a short stationary event after the flick.
 // Keep its measured velocity through that gap, in both the guide and release.

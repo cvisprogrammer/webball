@@ -4,8 +4,18 @@ import { simulateShot, sampleFrames, BALL_RADIUS, COURT_BOUNDS, courtPosition, p
 import { cameraPose } from '../public/physics.js';
 import { PerspectiveCamera, Vector3 } from 'three';
 
+function gestureAtSpeed(speed,velocity=2.5) {
+  let low=.01,high=1;
+  for(let i=0;i<40;i++) {
+    const dy=(low+high)/2;
+    if(shotSpeed({dy,velocity})<speed)low=dy;else high=dy;
+  }
+  const dy=(low+high)/2;
+  return {dx:0,dy,duration:dy/velocity,velocity};
+}
+
 test('swipe power and direction affect scoring; simulation replays deterministically', () => {
-  const good = { dx: 0, dy: .35, duration: .32 };
+  const good = { dx: 0, dy: .35, duration: .175 };
   assert.equal(simulateShot(good).made, true);
   assert.equal(simulateShot({ ...good, dx: .02 }).made, true,'a small near-rim error can still score');
   assert.equal(simulateShot({ ...good, dx: .04 }).made, false,'a modest angular error now misses');
@@ -21,7 +31,7 @@ test('swipe power and direction affect scoring; simulation replays deterministic
 });
 
 test('ball respects the floor, loses bounce energy, and shot/rebound paths meet', () => {
-  const shot = simulateShot({ dx: .2, dy: .35, duration: .32 });
+  const shot = simulateShot({ dx: .2, dy: .35, duration: .175 });
   const impact = shot.flight.at(-1);
   assert.deepEqual(impact.slice(1), shot.frames[0].slice(1));
   assert.ok(shot.frames.every(f => f[2] >= BALL_RADIUS - 1e-9));
@@ -34,10 +44,10 @@ test('ball respects the floor, loses bounce energy, and shot/rebound paths meet'
 });
 
 test('rim and backboard physically deflect shots', () => {
-  assert.equal(simulateShot({ dx: .1, dy: .255, duration: .32 },{x:.1,z:0}).feedback, 'Off the rim');
+  assert.equal(simulateShot({ dx: .1, dy: .255, duration: .175 },{x:.1,z:0}).feedback, 'Off the rim');
   const banks = [];
   for(let dy=.25;dy<=.65;dy+=.005) {
-    const shot = simulateShot({dx: .01,dy,duration:.32});
+    const shot = simulateShot({dx: .01,dy,duration:.175});
     if(shot.feedback==='Off the backboard')banks.push(shot);
   }
   assert.ok(banks.length > 0, 'some shots hit the backboard');
@@ -68,7 +78,7 @@ test('shots from nearby and sideways catch locations can reach the basket', () =
   for(const origin of [{x:1,z:2},{x:.1,z:0},{x:2,z:-.7}]) {
     let basket=false;
     for(let dy=.08;dy<.85;dy+=.005) {
-      const shot=simulateShot({dx:0,dy,duration:.32},origin);
+      const shot=simulateShot({dx:0,dy,duration:.175},origin);
       assert.equal(shot.flight[0][1],origin.x);assert.equal(shot.flight[0][3],origin.z);
       basket ||= shot.made;
     }
@@ -84,13 +94,13 @@ test('release speed and direction need accuracy while the guide remains valid at
     assert.equal(guide.reachable,true);
     const margin=(guide.maxSpeed-guide.minSpeed)*.2;
     for(const speed of [guide.minSpeed+margin,guide.speed,guide.maxSpeed-margin]) {
-      const dy=(speed-1.2)/7*.32,gesture={dx:0,dy,duration:.32,velocity:dy/.32};
+      const gesture=gestureAtSpeed(speed);
       assert.ok(validGesture(gesture));
       assert.equal(simulateShot(gesture,origin).made,true,`guide power ${speed} scores at ${JSON.stringify(origin)}`);
     }
   }
-  for(const velocity of [.05,.5,.9,1.3,2])assert.equal(simulateShot({dx:0,dy:.35,duration:.32,velocity}).made,false,'different release speeds genuinely miss');
-  assert.equal(simulateShot({dx:.15,dy:.35,duration:.32}).made,false);
+  for(const velocity of [.05,.5,1,1.5,3,5])assert.equal(simulateShot({dx:0,dy:.35,duration:.175,velocity}).made,false,'different release speeds genuinely miss');
+  assert.equal(simulateShot({dx:.15,dy:.35,duration:.175}).made,false);
   assert.equal(simulateShot({dx:0,dy:.85,duration:.08}).made,false);
 });
 
@@ -106,16 +116,17 @@ test('short gentle swipes release below the hoop rather than being rejected',()=
 });
 
 test('small angular changes steer the launch without an aim dead zone',()=>{
-  const straight={dx:0,dy:.35,duration:.32};
+  const straight={dx:0,dy:.35,duration:.175};
   const center=sampleFrames(simulateShot(straight).flight,100);
   const right=sampleFrames(simulateShot({...straight,dx:.02}).flight,100);
   const left=sampleFrames(simulateShot({...straight,dx:-.02}).flight,100);
   assert.equal(center.x,0);assert.ok(right.x>.01 && left.x<-.01);
   assert.ok(Math.abs(right.x+left.x)<1e-9,'equal angular offsets steer symmetrically');
+  assert.ok(Math.abs(Math.hypot(right.x,right.z-6)-Math.abs(center.z-6))<1e-9,'changing aim preserves the energy supplied by the swipe');
 });
 
 test('a basket loses speed in the net, then accelerates freely below it',()=>{
-  const shot=simulateShot({dx:0,dy:.35,duration:.32});
+  const shot=simulateShot({dx:0,dy:.35,duration:.175});
   assert.equal(shot.made,true);
   const impact=shot.netImpact;
   assert.ok(impact.time>0 && impact.velocity.y<0);
@@ -128,11 +139,11 @@ test('a basket loses speed in the net, then accelerates freely below it',()=>{
   const later=shot.flight[exitIndex+3],next=shot.flight[exitIndex+4];
   const laterSpeed=(later[2]-next[2])/(next[0]-later[0]);
   assert.ok(laterSpeed>exitSpeed+.5,'gravity accelerates the ball again after it exits');
-  assert.equal(simulateShot({dx:.2,dy:.35,duration:.32}).netImpact,null,'a miss never triggers a swish');
+  assert.equal(simulateShot({dx:.2,dy:.35,duration:.175}).netImpact,null,'a miss never triggers a swish');
 });
 
 test('net motion begins with the basket, keeps the rim attachments fixed and settles',()=>{
-  const shot=simulateShot({dx:0,dy:.35,duration:.32}),impact=shot.netImpact;
+  const shot=simulateShot({dx:0,dy:.35,duration:.175}),impact=shot.netImpact;
   const rest=netResponse(null,0),before=netResponse(impact,impact.time-.01);
   assert.deepEqual(before,rest);
   const pulled=netResponse(impact,impact.time+.1),settling=netResponse(impact,impact.time+.9);
@@ -178,65 +189,68 @@ test('old escaped rebounds and catch positions remain playable with cameras insi
   assert.deepEqual(courtPosition({x:Infinity,z:NaN}),{x:0,z:6});
 });
 
-test('the same target flick scores everywhere with launch speed scaled to the catch position',()=>{
-  const origins=[{x:0,z:6},{x:1,z:2},{x:.1,z:0},{x:2,z:-1}];
-  const targets=[],launchSpeeds=[];
+test('the guide calls for longer swipes farther away at the same release speed',()=>{
+  const origins=[{x:.1,z:0},{x:0,z:1},{x:1,z:2},{x:0,z:6},{x:3.8,z:7.5}];
+  const lengths=[];
   for(const origin of origins) {
-    const guide=shotGuide(origin);
+    const guide=shotGuide(origin),gesture=gestureAtSpeed(guide.speed);
     assert.equal(guide.reachable,true);
     assert.ok(guide.speed>=guide.minSpeed && guide.speed<=guide.maxSpeed);
-    const dy=(guide.speed-1.2)/7*.32;
-    const gesture={dx:0,dy,duration:.32,velocity:dy/.32};
-    assert.ok(Math.abs(shotSpeed(gesture)-guide.speed)<1e-9);
-    const shot=simulateShot(gesture,origin);
-    assert.equal(shot.made,true,'releasing at the target with straight aim scores');
-    launchSpeeds.push(shot.launchSpeed);
-    targets.push(guide.speed);
+    assert.equal(simulateShot(gesture,origin).made,true,'the guide target scores in the real simulation');
+    assert.ok(Math.abs(simulateShot(gesture,origin).launchSpeed-shotSpeed(gesture))<1e-9,'no distance-dependent boost changes the swipe energy');
+    lengths.push(gesture.dy);
   }
-  assert.ok(targets.every(t=>Math.abs(t-targets[0])<1e-9),'the comfortable target flick stays the same');
-  assert.ok(launchSpeeds[0]>launchSpeeds[1]+1,'the ball receives more speed for a farther shot');
+  assert.ok(lengths.every((length,i)=>i===0 || length>lengths[i-1]),'a more distant shot needs a longer stroke at the same speed');
+  assert.ok(lengths[3]>lengths[1]*1.6,'a distant shot needs noticeably more travel than a close shot');
   assert.equal(validGesture({dx:0,dy:.4,duration:3,velocity:1}),true,'a flick after a long hold still releases');
 });
 
-test('close layups forgive more release speed variation while distant shots remain precise',()=>{
-  const closeOrigins=[{x:0,z:0},{x:.23,z:0},{x:0,z:.85},{x:.1,z:1},{x:1,z:1},{x:0,z:2},{x:1,z:-.75}];
-  const gesture={dx:0,dy:.35,duration:.32};
-  const distant={x:0,z:6},farGuide=shotGuide(distant);
-  for(const origin of closeOrigins) {
-    const guide=shotGuide(origin);
-    assert.ok(guide.maxSpeed-guide.minSpeed>(farGuide.maxSpeed-farGuide.minSpeed)*3,'a layup has a much wider real scoring window');
-    assert.equal(guide.speed,farGuide.speed,'the target flick is comfortable at either distance');
-    for(const velocity of [.85,1,1.1,1.25,1.35])assert.equal(simulateShot({...gesture,velocity},origin).made,true,`layup velocity ${velocity} scores at ${JSON.stringify(origin)}`);
-    for(const velocity of [.1,2.5])assert.equal(simulateShot({...gesture,velocity},origin).made,false,'very weak or hard swipes still miss');
-    assert.equal(simulateShot({...gesture,dx:.5,velocity:1.1},origin).made,false,'large angular errors still miss');
+test('short quick flicks score close; longer swipes and accurate aim are needed farther away',()=>{
+  const close={x:0,z:1},far={x:0,z:6};
+  const short={dx:0,dy:.18,duration:.072,velocity:2.5};
+  const long={...short,dy:.32,duration:.128};
+  assert.equal(simulateShot(short,close).made,true,'a short quick swipe is sufficient near the basket');
+  assert.equal(simulateShot(short,far).made,false,'the same short swipe cannot reach a distant basket');
+  assert.equal(simulateShot(long,far).made,true,'continuing the swipe farther supplies enough energy');
+  assert.equal(simulateShot(long,close).made,false,'the game does not scale a long swipe down into a layup');
+  for(const dy of [.14,.18,.25])assert.equal(simulateShot({...short,dy},close).made,true,'the layup has a generous travel window');
+  for(const dy of [.14,.18,.25,.45])assert.equal(simulateShot({...short,dy},far).made,false,'underpowered and overpowered distant strokes miss');
+  for(const velocity of [1.8,2.5,3.5])assert.equal(simulateShot({...short,velocity},close).made,true,'normal brisk release speeds are forgiving close up');
+  for(const velocity of [.05,10])assert.equal(simulateShot({...long,velocity},far).made,false,'speed still matters with the same travel distance');
+  for(const origin of [close,far]) {
+    assert.equal(simulateShot({...short,dy:.025,velocity:100},origin).made,false,'even a very fast tiny swipe lacks sufficient work');
+    const target=gestureAtSpeed(shotGuide(origin).speed);
+    assert.equal(simulateShot({...target,dx:target.dy},origin).made,false,'a large sideways aim error still misses');
   }
-  for(const velocity of [.85,1,1.25,1.35])assert.equal(simulateShot({...gesture,velocity},distant).made,false,'the same power error misses from farther away');
-  const widths=[2,3,4,5].map(z=>{const guide=shotGuide({x:0,z});return guide.maxSpeed-guide.minSpeed;});
-  assert.ok(widths.every((width,i)=>i===0 || width<widths[i-1]),'forgiveness tapers gradually with distance');
+  const widths=[1,2,3,4,5,6].map(z=>{const guide=shotGuide({x:0,z});return (guide.maxSpeed-guide.minSpeed)/guide.speed;});
+  assert.ok(widths.every((width,i)=>i===0 || width<widths[i-1]),'the physical scoring window narrows gradually with distance');
 });
 
 test('a gentle layup starts at the caught position and clears the underside of the rim',()=>{
-  const gesture={dx:0,dy:.35,duration:.32,velocity:1.1};
   for(const origin of [{x:.23,z:0},{x:0,z:.8},{x:.1,z:1},{x:0,z:2}]) {
-    const shot=simulateShot(gesture,origin);
+    const shot=simulateShot(gestureAtSpeed(shotGuide(origin).speed),origin);
     assert.equal(shot.made,true);assert.deepEqual(shot.origin,origin);
     assert.deepEqual(shot.flight[0],[0,origin.x,1.6,origin.z],'the hand motion begins where the rebound was caught');
     assert.ok(Math.max(...shot.flight.map(f=>f[2]))<4.1,'the comfortable close release follows a gentle arc');
     assert.ok(shot.netImpact.time>.5 && shot.netImpact.velocity.y<0,'the ball descends through the hoop');
   }
-  const under=simulateShot(gesture,{x:.23,z:0});
+  const underOrigin={x:.23,z:0},under=simulateShot(gestureAtSpeed(shotGuide(underOrigin).speed),underOrigin);
   assert.ok(under.flight.some(f=>f[0]<.2 && f[1]<.05 && f[2]>2),'the ball is reached up while the saved standing position stays fixed');
 });
 
-test('recent velocity sets launch power regardless of drag length or time held',()=>{
-  const gesture={dx:0,dy:.35,duration:.32};
+test('launch power uses both recent speed and swipe travel, but holding still adds no energy',()=>{
+  const gesture={dx:0,dy:.35,duration:.175};
   const original=simulateShot(gesture);
-  assert.deepEqual(simulateShot({...gesture,velocity:.35/.32}).flight,original.flight);
-  assert.deepEqual(simulateShot({...gesture,dy:.7,duration:5,velocity:.35/.32}).flight,original.flight,'drag length and holding do not charge the shot');
+  assert.deepEqual(simulateShot({...gesture,velocity:2}).flight,original.flight);
+  assert.deepEqual(simulateShot({...gesture,duration:5,velocity:2}).flight,original.flight,'holding before the same flick does not charge it');
+  const longer=simulateShot({...gesture,dy:.7,velocity:2});
+  assert.ok(longer.launchSpeed>original.launchSpeed,'more travel at the same release velocity adds power');
+  assert.ok(Math.abs(longer.launchSpeed**2/original.launchSpeed**2-2)<1e-9,'twice the upward work doubles kinetic energy');
+  for(const origin of [{x:0,z:1},{x:0,z:6}])assert.equal(simulateShot(gesture,origin).launchSpeed,original.launchSpeed,'the same gesture delivers the same energy from every position');
   const stopped={...gesture,dy:.8,duration:5,velocity:0};
-  assert.equal(simulateShot(stopped).made,false,'a long drag with no release velocity stays weak');
-  const fast=simulateShot({...gesture,velocity:3});
-  const slow=simulateShot({...gesture,velocity:.4});
+  assert.equal(simulateShot(stopped).launchSpeed,0,'travel without an upward release supplies no push');
+  assert.equal(simulateShot(stopped).made,false);
+  const fast=simulateShot({...gesture,velocity:3}),slow=simulateShot({...gesture,velocity:.4});
   assert.ok(sampleFrames(fast.flight,100).z<sampleFrames(slow.flight,100).z);
   for(const velocity of [NaN,Infinity,-1,101,null,'1'])assert.equal(validGesture({...gesture,velocity}),false);
 });

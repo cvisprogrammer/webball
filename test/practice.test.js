@@ -6,16 +6,16 @@ import {reboundPosition,reboundWorld} from '../public/physics.js';
 test('solo shootaround needs no second player, counts baskets, and allows another shot',()=>{
   const game=createPractice();
   assert.equal(game.phase,'shoot');assert.equal(game.solo,true);
-  practiceAction(game,{action:'shoot',gesture:{dx:0,dy:.35,duration:.32}});
+  practiceAction(game,{action:'shoot',gesture:{dx:0,dy:.35,duration:.175}});
   assert.equal(game.scores[0],2);assert.equal(game.baskets,1);assert.equal(game.attempts,1);
   assert.equal(game.phase,'shoot');assert.equal(game.turn,0);
-  practiceAction(game,{action:'shoot',gesture:{dx:.2,dy:.35,duration:.32}});
+  practiceAction(game,{action:'shoot',gesture:{dx:.2,dy:.35,duration:.175}});
   assert.equal(game.phase,'rebound');assert.equal(game.attempts,2);
 });
 
 test('solo player catches their own miss and shoots from the catch location',()=>{
   const game=createPractice();
-  const gesture={dx:.2,dy:.35,duration:.32};
+  const gesture={dx:.2,dy:.35,duration:.175};
   practiceAction(game,{action:'shoot',gesture},1000);
   const trajectory=game.trajectory;
   practiceAction(game,{action:'start'},2000);
@@ -30,7 +30,7 @@ test('solo player catches their own miss and shoots from the catch location',()=
 
 test('returning to the starting spot keeps practice stats and changes no multiplayer state',()=>{
   const first=createPractice(),other=createPractice();
-  practiceAction(first,{action:'shoot',gesture:{dx:.2,dy:.35,duration:.32}});
+  practiceAction(first,{action:'shoot',gesture:{dx:.2,dy:.35,duration:.175}});
   first.positions[0]={x:2,z:3};
   practiceAction(first,{action:'reset'});
   assert.deepEqual(first.positions[0],{x:0,z:6});assert.equal(first.phase,'shoot');assert.equal(first.attempts,1);
