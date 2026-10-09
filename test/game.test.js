@@ -43,8 +43,9 @@ test('two players shoot, save an offline rebound, resume after restart and catch
     state = (await action(p0, { action: 'shoot', gesture: { dx: 0, dy: .35, duration: .32, velocity: .35/.32 } })).data;
     assert.deepEqual(state.scores, [2, 0]); assert.equal(state.turn, 1);
     const staleVersion = state.version;
-    state = (await action(p1, { action: 'shoot', gesture: { dx: .2, dy: .35, duration: .32 } })).data;
+    state = (await action(p1, { action: 'shoot', gesture: { dx: 0, dy: .025, duration: .5, velocity: .05 } })).data;
     assert.equal(state.phase, 'rebound'); assert.equal(state.turn, 0);
+    assert.equal(state.trajectory.feedback,'Short of the hoop','the server releases and saves even a very soft shot');
     assert.equal(state.startedAt, null);
     assert.equal((await request(`/api/action?id=${id}`, { action: 'start', version: staleVersion }, p0)).status, 409);
     const trajectory = state.trajectory;

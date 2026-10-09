@@ -5,13 +5,14 @@ export const NET_LENGTH = .42;
 const clamp = (v, low, high) => Math.max(low, Math.min(high, v));
 export const START_POSITION = { x: 0, z: 6 };
 export const COURT_BOUNDS = { minX: -3.8, maxX: 3.8, minZ: -.75, maxZ: 7.5, maxY: 7.35 };
-export const SHOT_ASSIST_RADIUS = 1.1;
+export const SHOT_ASSIST_RADIUS = .65;
+export const MIN_SWIPE_DISTANCE = .01;
 export function courtPosition(position = START_POSITION) {
   return { x: clamp(Number.isFinite(position?.x) ? position.x : START_POSITION.x, COURT_BOUNDS.minX, COURT_BOUNDS.maxX),
     z: clamp(Number.isFinite(position?.z) ? position.z : START_POSITION.z, COURT_BOUNDS.minZ, COURT_BOUNDS.maxZ) };
 }
 export const MAX_SHOT_SPEED = 17;
-export const shotSpeed = gesture => clamp(3.8 + gesture.dy * 7 + (gesture.velocity ?? gesture.dy / Math.max(.08,gesture.duration)) * 2.3, 4.5, MAX_SHOT_SPEED);
+export const shotSpeed = gesture => clamp(1.2 + (gesture.velocity ?? gesture.dy / Math.max(.008,gesture.duration)) * 7, 1.2, MAX_SHOT_SPEED);
 const launchAngle = distance => distance < .11 ? Math.PI/2 : Math.atan2(1.45+1.358*distance,distance);
 export function cameraPose(player = START_POSITION, focus = null) {
   player = courtPosition(player);
@@ -64,7 +65,7 @@ export function reboundPosition(trajectory,elapsed,player=START_POSITION) {
 }
 export const reboundDuration = trajectory => trajectory.frames ? trajectory.duration : REBOUND_DURATION;
 export function validGesture(g) {
-  return g && ['dx', 'dy', 'duration'].every(k => Number.isFinite(g[k])) && Math.abs(g.dx) <= .8 && g.dy >= .08 && g.dy <= .85 && g.duration >= .08 && g.duration <= 2 &&
+  return g && ['dx', 'dy', 'duration'].every(k => Number.isFinite(g[k])) && Math.abs(g.dx) <= 2 && g.dy >= MIN_SWIPE_DISTANCE && g.dy <= 2 && g.duration >= .008 &&
     (g.velocity === undefined || (Number.isFinite(g.velocity) && g.velocity >= 0 && g.velocity <= 100));
 }
 export function simulateShot(gesture, origin = START_POSITION) {
@@ -73,20 +74,14 @@ export function simulateShot(gesture, origin = START_POSITION) {
 export function shotOnTarget(gesture, origin = START_POSITION) {
   return !!validGesture(gesture) && simulate(gesture, courtPosition(origin), false).made;
 }
-function simulate(gesture, origin, savePath, assistRelease = true) {
+function simulate(gesture, origin, savePath) {
   if (!validGesture(gesture)) throw new Error('Swipe upward from the ball to shoot');
-  const power = shotSpeed(gesture);
-  const calibration = assistRelease ? shotCalibration(origin) : null;
-  // Compress power errors around a release that actually scores from this
-  // catch location. Swipe speed remains monotonic, with a much wider window.
-  const speed = calibration?.reachable ? calibration.speed + (power-calibration.speed)*calibration.response : power;
+  const speed = shotSpeed(gesture);
   const distance = Math.hypot(origin.x,origin.z);
   const forward = {x:-origin.x/(distance||1),z:-origin.z/(distance||1)};
   if(origin.x===0 && origin.z===0)forward.z=-1;
-  const direction=gesture.dx/gesture.dy;
-  // Small finger/trackpad drift aims at the hoop; deliberate sideways flicks
-  // still miss and leave a physical rebound for the next player.
-  const side=clamp(assistRelease ? Math.sign(direction)*Math.max(0,Math.abs(direction)-.25)*2 : direction,-1.5,1.5);
+  // Aim follows the actual swipe angle, including small deviations.
+  const side=clamp(gesture.dx/gesture.dy,-1.5,1.5);
   const angle=launchAngle(distance);
   const flat=speed*Math.cos(angle);
   let vx=flat*(forward.x-side*forward.z), vz=flat*(forward.z+side*forward.x);
@@ -158,20 +153,20 @@ function simulate(gesture, origin, savePath, assistRelease = true) {
   const start = sampleFrames(frames, split * 1000);
   const rebound = [[0, start.x, start.y, start.z], ...frames.filter(f => f[0] > split).map(f => [f[0] - split, ...f.slice(1)])];
   const flight = [...frames.filter(f => f[0] < split), [split, start.x, start.y, start.z]];
-  return { version: 7, netImpact, frames: rebound, flight: made ? frames.filter(f => f[0] <= 3) : flight,
+  return { version: 8, netImpact, frames: rebound, flight: made ? frames.filter(f => f[0] <= 3) : flight,
     duration: rebound.at(-1)[0] * 1000, flightDuration: made ? 3000 : split * 1000, made, feedback, gesture, origin: {x:origin.x,z:origin.z} };
 }
 
-const calibrationCache = new Map();
-function shotCalibration(origin) {
+const guideCache = new Map();
+export function shotGuide(origin = START_POSITION) {
   origin = courtPosition(origin);
   const key=`${origin.x},${origin.z}`;
-  if(calibrationCache.has(key))return calibrationCache.get(key);
+  if(guideCache.has(key))return guideCache.get(key);
   const distance=Math.hypot(origin.x,origin.z),angle=launchAngle(distance);
   const estimate=distance<.11 ? 6 : Math.sqrt(9.81*distance*distance/(2*Math.cos(angle)**2*(distance*Math.tan(angle)-1.45)));
-  // Find a generous successful release interval in the actual simulation,
+  // Find a successful release interval in the actual simulation,
   // including its gravity, air drag, rim and backboard collisions.
-  const makes = speed => speed>=5 && speed<=15.8 && simulate({dx:0,dy:(speed-3.8)/(7+2.3/.32),duration:.32},origin,false,false).made;
+  const makes = speed => speed>=5 && speed<=15.8 && simulate({dx:0,dy:(speed-1.2)/7*.32,duration:.32},origin,false).made;
   let best=null;
   function search(low,high,step) {
     let band=null;
@@ -197,16 +192,8 @@ function shotCalibration(origin) {
     for(let i=0;i<5 && makes(best.maxSpeed+precision);i++)best.maxSpeed+=precision;
   }
   const speed=best?(best.minSpeed+best.maxSpeed)/2:clamp(estimate,5,15.8);
-  const calibration={speed:best && !makes(speed)?best.minSpeed:speed,minSpeed:best?.minSpeed??speed,maxSpeed:best?.maxSpeed??speed,reachable:!!best,
-    response:best ? Math.max(.000001,Math.min(.25,(best.maxSpeed-best.minSpeed)/5.4)) : 1};
-  if(calibrationCache.size>200)calibrationCache.clear();calibrationCache.set(key,calibration);return calibration;
-}
-export function shotGuide(origin = START_POSITION) {
-  const calibration=shotCalibration(origin);
-  const {speed,response,reachable}=calibration;
-  return {speed,reachable,
-    minSpeed:clamp(speed+(calibration.minSpeed-speed)/response,4.5,MAX_SHOT_SPEED),
-    maxSpeed:clamp(speed+(calibration.maxSpeed-speed)/response,4.5,MAX_SHOT_SPEED)};
+  const guide={speed:best && !makes(speed)?best.minSpeed:speed,minSpeed:best?.minSpeed??speed,maxSpeed:best?.maxSpeed??speed,reachable:!!best};
+  if(guideCache.size>200)guideCache.clear();guideCache.set(key,guide);return guide;
 }
 
 // The recorded crossing drives both renderers without restarting the motion

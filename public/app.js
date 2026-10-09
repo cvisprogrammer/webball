@@ -1,4 +1,4 @@
-import { reboundPosition, reboundDuration, simulateShot, validGesture, sampleFrames, project, reboundWorld, START_POSITION, courtPosition, shotSpeed, shotGuide, shotOnTarget, MAX_SHOT_SPEED, netResponse } from './physics.js';
+import { reboundPosition, reboundDuration, simulateShot, validGesture, sampleFrames, project, reboundWorld, START_POSITION, courtPosition, shotSpeed, shotGuide, shotOnTarget, MAX_SHOT_SPEED, MIN_SWIPE_DISTANCE, netResponse } from './physics.js';
 import { createCourt, pointerPosition } from './court3d.js';
 import { createPractice, practiceAction } from './practice.js';
 import { createSwipe, moveSwipe, swipeGesture } from './swipe.js';
@@ -111,7 +111,7 @@ $('copy').onclick = async () => {
 };
 async function takeShot(gesture) {
   if (busy || shot || !game || game.phase !== 'shoot' || game.turn !== game.seat) return;
-  if (!validGesture(gesture)) { message('Press the ball, drag upward, then release. Try a smooth, medium-length flick.'); return; }
+  if (!validGesture(gesture)) { message('Press the ball, move it slightly upward, then release to shoot.'); return; }
   const trajectory = simulateShot(gesture, playerPosition());
   shot = { trajectory, start: performance.now(), player: {...playerPosition()} };
 
@@ -171,14 +171,14 @@ function updateRangeGuide(time=performance.now()) {
   const speed=gesture && gesture.dy>0 ? shotSpeed(gesture) : 0;
   const distance=Math.hypot(player.x,player.z);
   const inRange=speed>=guide.minSpeed && speed<=guide.maxSpeed;
-  const aligned=gesture && gesture.velocity>=.05 && inRange && guide.reachable && shotOnTarget(gesture,player);
+  const aligned=gesture && inRange && guide.reachable && shotOnTarget(gesture,player);
   display.style.setProperty('--target-level',`${guide.speed/MAX_SHOT_SPEED*100}%`);
   display.style.setProperty('--zone-bottom',`${guide.minSpeed/MAX_SHOT_SPEED*100}%`);
   display.style.setProperty('--zone-height',`${(guide.maxSpeed-guide.minSpeed)/MAX_SHOT_SPEED*100}%`);
   display.style.setProperty('--power-level',`${speed/MAX_SHOT_SPEED*100}%`);
   display.classList.toggle('aligned',!!aligned);
   $('range-distance').textContent=`${distance.toFixed(1)} m`;
-  $('range-status').textContent=!gesture ? 'Hold ball' : gesture.dy<.08 ? 'Flick upward' : gesture.duration>2 ? 'Try again' : gesture.velocity<.05 ? 'Keep moving' : aligned ? 'On target' : inRange ? 'Aim straight' : speed>guide.maxSpeed ? 'Swipe slower' : 'Swipe faster';
+  $('range-status').textContent=!gesture ? 'Hold ball' : gesture.dy<MIN_SWIPE_DISTANCE ? 'Move upward' : aligned ? 'On target' : inRange ? 'Aim straight' : speed>guide.maxSpeed ? 'Swipe slower' : 'Swipe faster';
   $('power').value=speed;
   $('power').setAttribute('aria-valuetext',`${speed.toFixed(1)} meters per second; target ${guide.speed.toFixed(1)}`);
 }

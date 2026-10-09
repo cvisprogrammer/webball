@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createSwipe, moveSwipe, swipeGesture } from '../public/swipe.js';
-import { shotSpeed, simulateShot } from '../public/physics.js';
+import { shotSpeed, simulateShot, validGesture } from '../public/physics.js';
 
-test('a steady flick uses the original launch speed and the guide matches its release',()=>{
+test('a steady flick uses its measured velocity and the guide matches its release',()=>{
   const swipe=createSwipe({x:.5,y:.8},0,1);
   for(let time=40;time<=320;time+=40)moveSwipe(swipe,{x:.5,y:.8-.35*time/320},time);
   const preview=swipeGesture(swipe,320);
@@ -12,6 +12,19 @@ test('a steady flick uses the original launch speed and the guide matches its re
   assert.ok(Math.abs(preview.velocity-.35/.32)<1e-9);
   assert.equal(shotSpeed(preview),shotSpeed(release));
   assert.equal(simulateShot(release).made,true);
+});
+
+test('a very gentle short drag and a flick after holding both release',()=>{
+  const soft=createSwipe({x:.5,y:.8},0,1);
+  moveSwipe(soft,{x:.5,y:.79},200);
+  moveSwipe(soft,{x:.5,y:.78},400);
+  const release=swipeGesture(soft,432);
+  assert.equal(validGesture(release),true);assert.equal(simulateShot(release).made,false);
+  const held=createSwipe({x:.5,y:.8},0,1);
+  for(let i=0;i<=8;i++)moveSwipe(held,{x:.5,y:.8-.35*i/8},3000+i*40);
+  const flick=swipeGesture(held,3352);
+  assert.ok(flick.duration>3);assert.equal(validGesture(flick),true);
+  assert.equal(simulateShot(flick).made,true,'waiting before a real flick does not reject it');
 });
 
 test('the recent flick controls velocity even after an initial slow drag or hold',()=>{
