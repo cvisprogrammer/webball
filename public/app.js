@@ -1,4 +1,4 @@
-import { reboundPosition, reboundDuration, simulateShot, validGesture, sampleFrames, project, reboundWorld, START_POSITION, courtPosition, shotSpeed, shotGuide, shotOnTarget, shotValue, MAX_SHOT_SPEED, MIN_SWIPE_DISTANCE, netResponse } from './physics.js';
+import { reboundPosition, reboundDuration, simulateShot, validGesture, sampleFrames, project, reboundWorld, START_POSITION, courtPosition, releaseFeedback, shotValue, MAX_SHOT_SPEED, MIN_SWIPE_DISTANCE, netResponse } from './physics.js';
 import { createCourt, pointerPosition } from './court3d.js';
 import { createPractice, practiceAction } from './practice.js';
 import { createSwipe, moveSwipe, swipeGesture } from './swipe.js';
@@ -6,6 +6,7 @@ import { createLightCourt } from './light-court.js';
 const $ = id => document.getElementById(id);
 const canvas = $('court');
 let swipe = null;
+let releaseCue={strength:0,state:'building'};
 let drawCourt, drawLightCourt, lightView = false;
 function useLightView() {
   swipe = null;
@@ -166,14 +167,14 @@ window.addEventListener('blur', () => { swipe=null;$('power').value=0; });
 function updateRangeGuide(time=performance.now()) {
   const display=$('range-display');
   display.hidden=!canShoot();
-  if(display.hidden)return;
-  const player=playerPosition(),guide=shotGuide(player);
+  if(display.hidden){releaseCue={strength:0,state:'building'};return;}
+  const player=playerPosition();
   const gesture=swipe ? swipeGesture(swipe,time) : null;
-  const speed=gesture && gesture.dy>0 ? shotSpeed(gesture) : 0;
+  const feedback=releaseFeedback(gesture,player);
+  const {guide,speed,inRange,onTarget:aligned}=feedback;
+  releaseCue={strength:feedback.strength,state:feedback.state};
   const distance=Math.hypot(player.x,player.z);
   display.querySelector('.range-title').textContent=distance<=2 ? 'LAYUP' : 'RANGE';
-  const inRange=speed>=guide.minSpeed && speed<=guide.maxSpeed;
-  const aligned=gesture && inRange && guide.reachable && shotOnTarget(gesture,player);
   display.style.setProperty('--target-level',`${guide.speed/MAX_SHOT_SPEED*100}%`);
   display.style.setProperty('--zone-bottom',`${guide.minSpeed/MAX_SHOT_SPEED*100}%`);
   display.style.setProperty('--zone-height',`${(guide.maxSpeed-guide.minSpeed)/MAX_SHOT_SPEED*100}%`);
@@ -205,7 +206,7 @@ function draw() {
     if(playback && elapsed>reboundDuration(playback.trajectory)){playback=null;message('It got away! Replay the saved rebound.');render();}
   }
   updateRangeGuide();
-  const state={position,player,focus,netState,time:performance.now(),ready:canShoot(),moving:Boolean(shot||playback)};
+  const state={position,player,focus,netState,releaseCue,time:performance.now(),ready:canShoot(),moving:Boolean(shot||playback)};
   if(lightView)drawLightCourt(state);
   else {
     try { drawCourt(state); }

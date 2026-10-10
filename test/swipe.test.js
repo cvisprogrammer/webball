@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createSwipe, moveSwipe, swipeGesture } from '../public/swipe.js';
-import { shotSpeed, simulateShot, validGesture } from '../public/physics.js';
+import { shotSpeed, simulateShot, validGesture, releaseFeedback } from '../public/physics.js';
 
 const FAR={x:0,z:6};
 
@@ -82,6 +82,7 @@ test('lifting a finger briefly after a scoring flick keeps the previewed velocit
     moveSwipe(swipe,{...swipe.to},175+gap);
     const release=swipeGesture(swipe,175+gap);
     assert.equal(shotSpeed(release),power,'release launches with the same previewed velocity');
+    assert.deepEqual(releaseFeedback(release,FAR),releaseFeedback(preview,FAR),'the glow also agrees through lift-off');
     assert.equal(simulateShot(release,FAR).made,true,'the normal lift-off gap does not turn a good swipe into a miss');
     assert.deepEqual(simulateShot(release,FAR).flight,simulateShot(preview,FAR).flight);
   }

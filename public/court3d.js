@@ -80,6 +80,14 @@ export function createCourt(canvas, { onContextLost = () => {}, onContextRestore
   for(let side=0;side<2;side++){lc.beginPath();for(let i=0;i<=128;i++){const x=i*8,y=256+Math.sin(i/128*Math.PI*2+side*Math.PI)*180;lc[i?'lineTo':'moveTo'](x,y);}lc.stroke();}
   const leatherTexture=new THREE.CanvasTexture(leather);leatherTexture.colorSpace=THREE.SRGBColorSpace;
   const basketball=mesh(new THREE.SphereGeometry(BALL_RADIUS,mobile?24:48,mobile?16:32),mat('#ffffff',{map:leatherTexture,bumpMap:mobile?null:leatherTexture,bumpScale:.0008,roughness:.86}),0,1.6,6);
+  basketball.name='basketball';
+  // A small billboard provides soft glow without a bloom pass or extra light.
+  const glowMap=document.createElement('canvas');glowMap.width=glowMap.height=128;
+  const gc=glowMap.getContext('2d'),gradient=gc.createRadialGradient(64,64,12,64,64,64);
+  gradient.addColorStop(0,'rgba(255,255,255,.7)');gradient.addColorStop(.45,'rgba(255,255,255,.3)');gradient.addColorStop(1,'rgba(255,255,255,0)');
+  gc.fillStyle=gradient;gc.fillRect(0,0,128,128);
+  const glow=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(glowMap),transparent:true,opacity:0,depthWrite:false,blending:THREE.AdditiveBlending}));
+  glow.name='release-glow';glow.scale.set(.46,.46,1);scene.add(glow);
   const contactShadow=mesh(new THREE.CircleGeometry(.16,24),new THREE.MeshBasicMaterial({color:'#17221a',transparent:true,opacity:.25,depthWrite:false}),0,.025,6,false);contactShadow.rotation.x=-Math.PI/2;contactShadow.visible=mobile;
   const halo=mesh(new THREE.TorusGeometry(.15,.002,6,48),new THREE.MeshBasicMaterial({color:'#d3f775',transparent:true,opacity:.7,depthTest:false}),0,1.6,6,false);
   const hint=document.getElementById('court-hint');
@@ -96,12 +104,12 @@ export function createCourt(canvas, { onContextLost = () => {}, onContextRestore
     renderer.shadowMap.enabled=false;renderer.setPixelRatio(1);canvas.dataset.renderer='webgl';onContextRestored();
   });
   let previousNet=null;
-  return function draw({position={...START_POSITION,y:1.6},player=START_POSITION,focus=null,netState=netResponse(null,0),time=0,ready=false,moving=false}={}) {
+  return function draw({position={...START_POSITION,y:1.6},player=START_POSITION,focus=null,netState=netResponse(null,0),releaseCue={strength:0,state:'building'},time=0,ready=false,moving=false}={}) {
     if(lost || (mobile && moving && time-lastRender<1000/30))return;
     const bounds=canvas.getBoundingClientRect();
     const width=Math.round(Math.min(bounds.width||W,(bounds.height||H)*W/H,W));
     if(width!==renderWidth){renderWidth=width;renderer.setSize(width,width*H/W,false);}
-    const frame=JSON.stringify([position,player,focus,ready,netState,renderWidth,moving?time:0]);
+    const frame=JSON.stringify([position,player,focus,ready,netState,releaseCue,renderWidth,moving?time:0]);
     if(frame===previousFrame)return;previousFrame=frame;
     const pose=cameraPose(player,focus);camera.position.set(pose.eye.x,pose.eye.y,pose.eye.z);camera.lookAt(pose.target.x,pose.target.y,pose.target.z);
     const netFrame=JSON.stringify(netState);
@@ -118,7 +126,12 @@ export function createCourt(canvas, { onContextLost = () => {}, onContextRestore
       }
     }
     basketball.position.set(position.x,position.y,position.z);basketball.rotation.set(position.z*.6,moving?time*.0008:0,position.x*.4);
+    const strength=ready ? releaseCue.strength : 0;
+    const tint=releaseCue.state==='ready' ? '#87f7a3' : releaseCue.state==='strong' ? '#ff7655' : '#ffc15c';
+    basketball.material.emissive.set(tint);basketball.material.emissiveIntensity=strength*.22;
+    glow.visible=strength>.002;glow.position.copy(basketball.position);glow.material.color.set(tint);glow.material.opacity=strength*.9;
     halo.visible=ready;halo.position.copy(basketball.position);halo.quaternion.copy(camera.quaternion);
+    halo.material.color.set(strength>.02 ? tint : '#d3f775');halo.material.opacity=.7+strength*.25;
     if(contactShadow.visible){contactShadow.position.set(position.x,.025,position.z);contactShadow.scale.setScalar(1+position.y*.15);contactShadow.material.opacity=Math.max(.04,.25-position.y*.025);}
     if(hint)hint.hidden=!ready;
     canvas.dataset.eye=JSON.stringify(pose.eye);renderer.render(scene,camera);lastRender=time;

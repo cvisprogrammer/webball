@@ -25,11 +25,11 @@ export function createLightCourt(canvas) {
     return output.map(p => projected(p, player, focus));
   }
   const point = (x, y, z) => ({ x, y, z });
-  const draw = ({ position, player = START_POSITION, focus = null, ready = false, netState = netResponse(null,0) } = {}) => {
+  const draw = ({ position, player = START_POSITION, focus = null, ready = false, netState = netResponse(null,0), releaseCue = {strength:0,state:'building'} } = {}) => {
     if (!active) { active = true; canvas.style.opacity = '0'; layer.hidden = false; }
     const bounds = canvas.getBoundingClientRect(), width = Math.round(bounds.width), height = Math.round(bounds.height);
     if (!width || !height) return;
-    const frame = JSON.stringify([position, player, focus, ready, netState, width, height]);
+    const frame = JSON.stringify([position, player, focus, ready, netState, releaseCue, width, height]);
     if (frame === previous) return;
     previous = frame;
     if (layer.width !== width || layer.height !== height) { layer.width = width; layer.height = height; }
@@ -70,13 +70,22 @@ export function createLightCourt(canvas) {
     const ball = projected(position, player, focus);
     if (ball.depth > .06 && Number.isFinite(ball.x + ball.y + ball.scale)) {
       const radius = Math.min(H * .4, BALL_RADIUS * ball.scale);
+      const strength=ready ? releaseCue.strength : 0;
+      const tint=releaseCue.state==='ready' ? '#87f7a3' : releaseCue.state==='strong' ? '#ff7655' : '#ffc15c';
+      if(strength>.002) {
+        const rgb=releaseCue.state==='ready' ? '135,247,163' : releaseCue.state==='strong' ? '255,118,85' : '255,193,92';
+        const glow=ctx.createRadialGradient(ball.x,ball.y,radius*.75,ball.x,ball.y,radius*1.9);
+        glow.addColorStop(0,`rgba(${rgb},${strength*.55})`);glow.addColorStop(.45,`rgba(${rgb},${strength*.25})`);glow.addColorStop(1,`rgba(${rgb},0)`);
+        ctx.fillStyle=glow;ctx.beginPath();ctx.arc(ball.x,ball.y,radius*1.9,0,Math.PI*2);ctx.fill();
+      }
       ctx.save(); ctx.beginPath(); ctx.arc(ball.x, ball.y, radius, 0, Math.PI * 2); ctx.clip();
       const leather = ctx.createRadialGradient(ball.x - radius * .4, ball.y - radius * .5, radius * .1, ball.x, ball.y, radius);
       leather.addColorStop(0, '#ffbb55'); leather.addColorStop(1, '#a54b16'); ctx.fillStyle = leather; ctx.fillRect(ball.x - radius, ball.y - radius, radius * 2, radius * 2);
+      ctx.globalAlpha=strength*.2;ctx.fillStyle=tint;ctx.fillRect(ball.x-radius,ball.y-radius,radius*2,radius*2);ctx.globalAlpha=1;
       ctx.strokeStyle = '#48270f'; ctx.lineWidth = Math.max(1, radius * .035);
       ctx.beginPath(); ctx.moveTo(ball.x - radius, ball.y); ctx.lineTo(ball.x + radius, ball.y); ctx.moveTo(ball.x, ball.y - radius); ctx.lineTo(ball.x, ball.y + radius);
       ctx.stroke(); ctx.beginPath();ctx.ellipse(ball.x, ball.y, radius * .45, radius, 0, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
-      if (ready) { ctx.beginPath(); ctx.arc(ball.x, ball.y, radius * 1.2, 0, Math.PI * 2); ctx.strokeStyle = '#d3f775'; ctx.lineWidth = 2; ctx.stroke(); }
+      if (ready) { ctx.beginPath(); ctx.arc(ball.x, ball.y, radius * 1.2, 0, Math.PI * 2); ctx.strokeStyle = strength>.02 ? tint : '#d3f775'; ctx.lineWidth = 2; ctx.stroke(); }
     }
     ctx.restore();
     const hint = document.getElementById('court-hint'); if (hint) hint.hidden = !ready;

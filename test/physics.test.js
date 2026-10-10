@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { simulateShot, sampleFrames, BALL_RADIUS, COURT_BOUNDS, courtPosition, project, reboundWorld, reboundPosition, validGesture, shotGuide, shotSpeed, shotValue, START_POSITION, HOOP, NET_LENGTH, netResponse, netPoint } from '../public/physics.js';
+import { simulateShot, sampleFrames, BALL_RADIUS, COURT_BOUNDS, courtPosition, project, reboundWorld, reboundPosition, validGesture, shotGuide, shotSpeed, shotValue, releaseFeedback, START_POSITION, HOOP, NET_LENGTH, netResponse, netPoint } from '../public/physics.js';
 import { cameraPose } from '../public/physics.js';
 import { PerspectiveCamera, Vector3 } from 'three';
 
@@ -32,7 +32,8 @@ test('only shots standing on the painted foul line are worth two points',()=>{
 test('swipe power and direction affect scoring; simulation replays deterministically', () => {
   const good = { dx: 0, dy: .35, duration: .175 };
   assert.equal(simulateShot(good,FAR).made, true);
-  assert.equal(simulateShot({ ...good, dx: .02 },FAR).made, true,'a small near-rim error can still score');
+  assert.equal(simulateShot({ ...good, dx: .015 },FAR).made, true,'a small near-rim error can still score');
+  assert.equal(simulateShot({ ...good, dx: .02 },FAR).made, false,'a larger error hits the rim instead of being pulled into the net');
   assert.equal(simulateShot({ ...good, dx: .04 },FAR).made, false,'a modest angular error now misses');
   assert.equal(simulateShot({ ...good, dx: .12 },FAR).made, false,'a more sideways flick now misses');
   assert.equal(simulateShot({ ...good, dy: .12 },FAR).made, false,'a weak swipe now falls outside the smaller power window');
@@ -138,6 +139,38 @@ test('small angular changes steer the launch without an aim dead zone',()=>{
   assert.equal(center.x,0);assert.ok(right.x>.01 && left.x<-.01);
   assert.ok(Math.abs(right.x+left.x)<1e-9,'equal angular offsets steer symmetrically');
   assert.ok(Math.abs(Math.hypot(right.x,right.z-6)-Math.abs(center.z-6))<1e-9,'changing aim preserves the energy supplied by the swipe');
+});
+
+test('sideways assistance is gradual and wider angled shots are not redirected into the net',()=>{
+  const good={dx:.012,dy:.22,duration:.088,velocity:2.5};
+  const shot=simulateShot(good);
+  assert.equal(shot.made,true,'a small aim error can still score');
+  assert.equal(simulateShot({...good,dx:.033}).made,false,'a wider angle that previously snapped into the hoop now misses');
+  const descending=shot.flight.filter((f,i,a)=>i>0 && f[2]>HOOP.y+.1 && f[2]<a[i-1][2]);
+  const velocities=descending.slice(1).map((f,i)=>(f[1]-descending[i][1])/(f[0]-descending[i][0]));
+  assert.ok(velocities.some(v=>v<0),'the small nudge can bend the approach');
+  assert.ok(velocities.slice(1).every((v,i)=>Math.abs(v-velocities[i])<.12),'the approach has no sudden sideways velocity reversal');
+  assert.ok(Math.max(...shot.flight.filter(f=>f[2]>HOOP.y+.1).map(f=>f[1]))>.07,'the original lateral travel remains visible');
+});
+
+test('release glow builds toward ideal power and only signals green for a scoring release',()=>{
+  for(const origin of [{x:0,z:1},START_POSITION,FAR]) {
+    const guide=shotGuide(origin),target=gestureAtSpeed(guide.speed);
+    const low=releaseFeedback(gestureAtSpeed(guide.speed*.55),origin);
+    const closer=releaseFeedback(gestureAtSpeed(guide.speed*.85),origin);
+    const ready=releaseFeedback(target,origin);
+    assert.ok(low.strength<closer.strength && closer.strength<ready.strength);
+    assert.ok(ready.strength>.999);assert.equal(ready.state,'ready');assert.equal(ready.onTarget,true);
+    assert.equal(ready.speed,simulateShot(target,origin).launchSpeed,'the cue predicts the actual release power');
+    const wrongAim=releaseFeedback({...target,dx:target.dy},origin);
+    assert.equal(wrongAim.strength,ready.strength,'power feedback stays useful when aim is wrong');
+    assert.equal(wrongAim.state,'aim');assert.equal(wrongAim.onTarget,false,'correct power alone never promises a basket');
+    const tooMuch=releaseFeedback(gestureAtSpeed(guide.maxSpeed*1.2),origin);
+    assert.equal(tooMuch.state,'strong');assert.ok(tooMuch.strength<ready.strength);
+    assert.equal(releaseFeedback(null,origin).strength,0);
+    assert.equal(releaseFeedback({...target,dy:0},origin).strength,0,'a click does not charge the glow');
+    assert.equal(releaseFeedback({...target,velocity:0},origin).strength,0,'pausing until the release stops removes the glow');
+  }
 });
 
 test('a basket loses speed in the net, then accelerates freely below it',()=>{

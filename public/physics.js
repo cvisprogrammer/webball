@@ -129,6 +129,7 @@ function simulate(gesture, origin, savePath, physicalSpeed = null) {
   let x = model.underHoop ? -side*forward.z*.25 : origin.x;
   let z = model.underHoop ? side*forward.x*.25 : origin.z;
   let y = model.height, made = false, contact = null, feedback = 'Air ball', shotLive = true, assisted = false, netImpact = null, netExited = false;
+  let assistTime=0,assistX=0,assistZ=0;
   const frames = savePath ? [[0, origin.x, 1.6, origin.z]] : null, dt = 1 / 120;
   if(savePath && model.carryDuration) {
     for(let t=.025;t<model.carryDuration;t+=.025) {
@@ -137,20 +138,31 @@ function simulate(gesture, origin, savePath, physicalSpeed = null) {
     }
     frames.push([model.carryDuration,x,y,z]);
   }
-  const impact = (time, kind) => { if (contact === null && !made) { contact = time; feedback = kind; } };
+  const impact = (time, kind) => { if (contact === null && !made) { assistTime=0;contact = time; feedback = kind; } };
   for (let step = 1; step <= 1440; step++) {
     const time = model.carryDuration+step * dt, previousX = x, previousY = y, previousZ = z;
     vy -= 9.81 * dt;
     vx *= 1 - .025 * dt; vz *= 1 - .025 * dt;
+    if(assistTime>0) {
+      const elapsed=Math.min(dt,assistTime);
+      vx+=assistX*elapsed;vz+=assistZ*elapsed;assistTime-=elapsed;
+    }
     x += vx * dt; y += vy * dt; z += vz * dt;
-    // Redirect a nearby descending shot once, before the board or rim can
-    // block it. Launch speed and large misses remain driven by the swipe.
+    // Preserve the forgiving range window, but give sideways aim only a
+    // partial nudge. Spread it over time so the ball cannot snap at the net.
     if (shotLive && !assisted && contact === null && y <= HOOP.y + 1.15 && y > HOOP.y + .15 && vy < 0) {
       const remaining = (vy + Math.sqrt(vy * vy + 2 * 9.81 * (y - HOOP.y))) / 9.81;
       const landingX = x + vx * remaining, landingZ = z + vz * remaining;
       if (remaining > .05 && Math.hypot(landingX, landingZ) <= SHOT_ASSIST_RADIUS) {
         const entryTime = (vy + Math.sqrt(vy * vy + 2 * 9.81 * (y - HOOP.y - .05))) / 9.81;
-        vx = -x / entryTime; vz = -z / entryTime;
+        const entryX=x+vx*entryTime,entryZ=z+vz*entryTime;
+        const lateral=-forward.z*entryX+forward.x*entryZ;
+        const depth=forward.x*entryX+forward.z*entryZ;
+        const nudge=Math.abs(lateral)<=.4 ? clamp(-lateral*.6,-.2,.2) : 0;
+        assistTime=Math.min(.16,entryTime*.6);
+        const travel=assistTime*(entryTime-assistTime/2);
+        assistX=(-forward.z*nudge-forward.x*depth)/travel;
+        assistZ=(forward.x*nudge-forward.z*depth)/travel;
         assisted = true;
       }
     }
@@ -202,7 +214,7 @@ function simulate(gesture, origin, savePath, physicalSpeed = null) {
   const start = sampleFrames(frames, split * 1000);
   const rebound = [[0, start.x, start.y, start.z], ...frames.filter(f => f[0] > split).map(f => [f[0] - split, ...f.slice(1)])];
   const flight = [...frames.filter(f => f[0] < split), [split, start.x, start.y, start.z]];
-  return { version: 11, points:made ? shotValue(origin) : 0, launchSpeed:speed, netImpact, frames: rebound, flight: made ? frames.filter(f => f[0] <= 3) : flight,
+  return { version: 12, points:made ? shotValue(origin) : 0, launchSpeed:speed, netImpact, frames: rebound, flight: made ? frames.filter(f => f[0] <= 3) : flight,
     duration: rebound.at(-1)[0] * 1000, flightDuration: made ? 3000 : split * 1000, made, feedback, gesture, origin: {x:origin.x,z:origin.z} };
 }
 
@@ -247,6 +259,15 @@ function shotCalibration(origin) {
 }
 export function shotGuide(origin = START_POSITION) {
   return shotCalibration(origin);
+}
+export function releaseFeedback(gesture,origin = START_POSITION) {
+  const guide=shotGuide(origin),speed=gesture?.dy>0 ? shotSpeed(gesture) : 0;
+  const inRange=speed>=guide.minSpeed && speed<=guide.maxSpeed;
+  const onTarget=!!gesture && inRange && guide.reachable && shotOnTarget(gesture,origin);
+  const error=(speed-guide.speed)/(guide.speed*.28);
+  const strength=speed>0 && gesture?.dy>=MIN_SWIPE_DISTANCE && guide.reachable ? Math.exp(-error*error) : 0;
+  return {guide,speed,inRange,onTarget,strength,
+    state:onTarget ? 'ready' : speed>guide.maxSpeed ? 'strong' : inRange ? 'aim' : 'building'};
 }
 
 // The recorded crossing drives both renderers without restarting the motion
