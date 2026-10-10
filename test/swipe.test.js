@@ -1,9 +1,25 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createSwipe, moveSwipe, swipeGesture } from '../public/swipe.js';
-import { shotSpeed, simulateShot, validGesture, releaseFeedback } from '../public/physics.js';
+import { shotSpeed, simulateShot, validGesture, releaseFeedback, strokeGuide } from '../public/physics.js';
 
 const FAR={x:0,z:6};
+
+test('a demonstrated half-second stroke builds visible feedback and releases at its previewed power',()=>{
+  const guide=strokeGuide(),swipe=createSwipe({x:.5,y:.735},0,1);
+  const end=guide.duration*1000,states=[];
+  for(let time=16;time<end;time+=16) {
+    moveSwipe(swipe,{x:.5,y:.735-guide.velocity*time/1000},time);
+    states.push(releaseFeedback(swipeGesture(swipe,time)).state);
+  }
+  moveSwipe(swipe,{x:.5,y:.735-guide.length},end);
+  const preview=swipeGesture(swipe,end),release=swipeGesture(swipe,end+32);
+  assert.ok(states.filter(state=>state==='ready').length>=4,'several live frames show green before release');
+  assert.ok(states.includes('building'));
+  assert.equal(shotSpeed(preview),shotSpeed(release));
+  assert.ok(Math.abs(shotSpeed(release)-guide.speed)<1e-9);
+  assert.equal(simulateShot(release).made,true);
+});
 
 test('a steady flick uses its measured velocity and the guide matches its release',()=>{
   const swipe=createSwipe({x:.5,y:.8},0,1);

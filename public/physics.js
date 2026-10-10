@@ -18,6 +18,9 @@ export function shotValue(position = START_POSITION) {
   return Math.abs(z-FOUL_LINE.z)<=.15+1e-9 && Math.abs(x)<=FOUL_LINE.halfWidth+1e-9 ? 2 : 1;
 }
 export const MAX_SHOT_SPEED = 17;
+const SWIPE_WORK = 450;
+const SWIPE_PUSH = 2;
+const swipePush = velocity => Math.max(0,velocity)/(Math.max(0,velocity)+SWIPE_PUSH);
 const swipeVelocity = gesture => gesture.velocity ?? gesture.dy / Math.max(.008,gesture.duration);
 export function shotSpeed(gesture) {
   const velocity=Math.max(0,swipeVelocity(gesture));
@@ -25,8 +28,7 @@ export function shotSpeed(gesture) {
   // from release speed. The bounded push keeps everyday brisk flicks usable;
   // extra travel still adds energy. Convert that work to kinetic energy:
   // v_ball² = 2 * work / mass. This mapping is identical at every catch spot.
-  const push=velocity/(velocity+2);
-  return clamp(Math.sqrt(450*Math.max(0,gesture.dy)*push),0,MAX_SHOT_SPEED);
+  return clamp(Math.sqrt(SWIPE_WORK*Math.max(0,gesture.dy)*swipePush(velocity)),0,MAX_SHOT_SPEED);
 }
 function launchModel(origin) {
   const distance=Math.hypot(origin.x,origin.z),underHoop=distance<=.85;
@@ -260,6 +262,16 @@ function shotCalibration(origin) {
 export function shotGuide(origin = START_POSITION) {
   return shotCalibration(origin);
 }
+// Demonstrate a deliberate stroke instead of asking players to react to a
+// tenth-second flick. This only describes input; it never changes shot power.
+export function strokeGuide(origin = START_POSITION) {
+  const guide=shotGuide(origin),energy=guide.speed*guide.speed;
+  const velocity=Math.max(.9,SWIPE_PUSH*energy/(SWIPE_WORK*.6-energy));
+  const work=SWIPE_WORK*swipePush(velocity);
+  const length=energy/work;
+  return {...guide,velocity,length,duration:length/velocity,
+    minLength:guide.minSpeed*guide.minSpeed/work,maxLength:guide.maxSpeed*guide.maxSpeed/work};
+}
 export function releaseFeedback(gesture,origin = START_POSITION) {
   const guide=shotGuide(origin),speed=gesture?.dy>0 ? shotSpeed(gesture) : 0;
   const inRange=speed>=guide.minSpeed && speed<=guide.maxSpeed;
@@ -268,6 +280,25 @@ export function releaseFeedback(gesture,origin = START_POSITION) {
   const strength=speed>0 && gesture?.dy>=MIN_SWIPE_DISTANCE && guide.reachable ? Math.exp(-error*error) : 0;
   return {guide,speed,inRange,onTarget,strength,
     state:onTarget ? 'ready' : speed>guide.maxSpeed ? 'strong' : inRange ? 'aim' : 'building'};
+}
+export function shotLesson(gesture,origin = START_POSITION) {
+  const feedback=releaseFeedback(gesture,origin);
+  const power=feedback.inRange ? 'good' : feedback.speed>feedback.guide.maxSpeed ? 'strong' : 'short';
+  const side=gesture.dy>0 ? gesture.dx/gesture.dy : 0;
+  const aim=Math.abs(side)<=.025 ? 'straight' : side>0 ? 'right' : 'left';
+  const aimText=aim==='straight' ? 'straight' : `${Math.abs(side)<.12 ? 'slightly ' : ''}${aim}`;
+  const summary=`${power==='good' ? 'Power good' : power==='strong' ? 'Too strong' : 'Too weak'} · ${aimText}`;
+  let tip=power==='strong' ? 'Try a shorter stroke at the same smooth pace.' :
+    power==='short' ? 'Try a longer stroke at the same smooth pace.' :
+    feedback.onTarget ? 'Keep that pace and length for your next shot.' : 'Close! Try a small power adjustment.';
+  if(aim!=='straight') {
+    const correction=`aim a little ${aim==='right' ? 'left' : 'right'}`;
+    tip=power==='good' ? `Keep that pace and length; ${correction}.` :
+      `Try a ${power==='strong' ? 'shorter' : 'longer'} stroke and ${correction}.`;
+  }
+  if(power==='short' && swipeVelocity(gesture)<.2)
+    tip='Release while still moving upward; avoid pausing at the end.';
+  return {...feedback,power,aim,summary,tip};
 }
 
 // The recorded crossing drives both renderers without restarting the motion

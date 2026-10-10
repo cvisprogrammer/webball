@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { simulateShot, sampleFrames, BALL_RADIUS, COURT_BOUNDS, courtPosition, project, reboundWorld, reboundPosition, validGesture, shotGuide, shotSpeed, shotValue, releaseFeedback, START_POSITION, HOOP, NET_LENGTH, netResponse, netPoint } from '../public/physics.js';
+import { simulateShot, sampleFrames, BALL_RADIUS, COURT_BOUNDS, courtPosition, project, reboundWorld, reboundPosition, validGesture, shotGuide, strokeGuide, shotLesson, shotSpeed, shotValue, releaseFeedback, START_POSITION, HOOP, NET_LENGTH, netResponse, netPoint } from '../public/physics.js';
 import { cameraPose } from '../public/physics.js';
 import { PerspectiveCamera, Vector3 } from 'three';
 
@@ -171,6 +171,44 @@ test('release glow builds toward ideal power and only signals green for a scorin
     assert.equal(releaseFeedback({...target,dy:0},origin).strength,0,'a click does not charge the glow');
     assert.equal(releaseFeedback({...target,velocity:0},origin).strength,0,'pausing until the release stops removes the glow');
   }
+});
+
+test('the demonstrated smooth stroke scores using unchanged physical input power',()=>{
+  const origins=[{x:0,z:1},START_POSITION,FAR,{x:3.8,z:7.5},{x:0,z:0}];
+  const guides=origins.map(origin=>{
+    const guide=strokeGuide(origin);
+    const gesture={dx:0,dy:guide.length,duration:guide.duration,velocity:guide.velocity};
+    assert.ok(validGesture(gesture));
+    assert.ok(guide.length<=.6+1e-9,'the demonstration fits above the held ball');
+    assert.ok(Math.abs(shotSpeed(gesture)-guide.speed)<1e-9);
+    assert.equal(simulateShot(gesture,origin).made,true);
+    assert.ok(guide.minLength<=guide.length && guide.maxLength>=guide.length);
+    assert.ok(Math.abs(shotSpeed({...gesture,dy:guide.minLength})-guide.minSpeed)<1e-9);
+    assert.ok(Math.abs(shotSpeed({...gesture,dy:guide.maxLength})-guide.maxSpeed)<1e-9);
+    return guide;
+  });
+  assert.ok(guides[1].duration>.4 && guides[1].duration<.6,'foul-line practice has time to see feedback');
+  assert.ok(guides[2].length>guides[1].length && guides[1].length>guides[0].length);
+  assert.ok((guides[1].maxLength-guides[1].minLength)/guides[1].velocity>.14,'the scoring glow lasts over 140 ms during a smooth stroke');
+});
+
+test('shot lessons distinguish power from aim and give a consistent next adjustment',()=>{
+  const guide=strokeGuide(),good={dx:0,dy:guide.length,duration:guide.duration,velocity:guide.velocity};
+  const lesson=shotLesson(good);
+  assert.equal(lesson.power,'good');assert.equal(lesson.aim,'straight');assert.equal(lesson.onTarget,true);
+  const short=shotLesson({...good,dy:good.dy*.4});
+  assert.equal(short.power,'short');assert.match(short.tip,/longer stroke/);
+  const strong=shotLesson({...good,dy:good.dy*1.6});
+  assert.equal(strong.power,'strong');assert.match(strong.tip,/shorter stroke/);
+  for(const sign of[-1,1]) {
+    const angle=shotLesson({...good,dx:good.dy*.15*sign});
+    assert.equal(angle.power,'good');assert.equal(angle.aim,sign>0?'right':'left');
+    assert.equal(angle.onTarget,false);assert.match(angle.tip,new RegExp(`aim a little ${sign>0?'left':'right'}`));
+    assert.equal(angle.speed,lesson.speed,'direction feedback does not change input energy');
+  }
+  assert.match(shotLesson({...good,dx:good.dy*.05}).summary,/slightly right/);
+  const stopped=shotLesson({...good,velocity:0});
+  assert.equal(stopped.power,'short');assert.match(stopped.tip,/avoid pausing/);
 });
 
 test('a basket loses speed in the net, then accelerates freely below it',()=>{

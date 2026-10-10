@@ -3,11 +3,15 @@ import { START_POSITION, courtPosition, validGesture, simulateShot, reboundDurat
 export function createPractice() {
   return { solo:true, seat:0, players:['You',null], scores:[0,0], rebounds:[0,0],
     positions:[{...START_POSITION},{...START_POSITION}], turn:0, phase:'shoot',
-    trajectory:null, startedAt:null, version:0, attempts:0, baskets:0 };
+    trajectory:null, startedAt:null, version:0, attempts:0, baskets:0, drill:false };
 }
 export function practiceAction(game,body,now=Date.now()) {
   game.positions[0] = courtPosition(game.positions[0]);
-  if(body.action==='reset') {
+  if(body.action==='drill') {
+    if(typeof body.enabled!=='boolean')throw new Error('Choose a practice mode.');
+    game.drill=body.enabled;
+    game.positions[0]={...START_POSITION};game.phase='shoot';game.trajectory=null;game.startedAt=null;
+  } else if(body.action==='reset') {
     game.positions[0]={...START_POSITION};game.phase='shoot';game.trajectory=null;game.startedAt=null;
   } else if(body.action==='shoot' && game.phase==='shoot') {
     if(!validGesture(body.gesture))throw new Error('Press the ball, drag upward, then release to shoot.');
@@ -15,9 +19,10 @@ export function practiceAction(game,body,now=Date.now()) {
     game.attempts++;
     if(trajectory.made){
       game.scores[0]+=trajectory.points;game.baskets++;
-      game.positions[0]={...START_POSITION};game.trajectory=null;game.startedAt=null;
     }
-    else{game.phase='rebound';game.trajectory=trajectory;game.startedAt=null;}
+    if(trajectory.made || game.drill){
+      game.positions[0]={...START_POSITION};game.trajectory=null;game.startedAt=null;
+    } else{game.phase='rebound';game.trajectory=trajectory;game.startedAt=null;}
   } else if(body.action==='start' && game.phase==='rebound') {
     game.startedAt=now;
   } else if(body.action==='catch' && game.phase==='rebound' && game.startedAt!==null) {

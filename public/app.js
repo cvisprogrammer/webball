@@ -1,4 +1,4 @@
-import { reboundPosition, reboundDuration, simulateShot, validGesture, sampleFrames, project, reboundWorld, START_POSITION, courtPosition, releaseFeedback, shotValue, MAX_SHOT_SPEED, MIN_SWIPE_DISTANCE, netResponse } from './physics.js';
+import { reboundPosition, reboundDuration, simulateShot, validGesture, sampleFrames, project, reboundWorld, START_POSITION, courtPosition, releaseFeedback, strokeGuide, shotLesson, shotValue, MAX_SHOT_SPEED, MIN_SWIPE_DISTANCE, netResponse } from './physics.js';
 import { createCourt, pointerPosition } from './court3d.js';
 import { createPractice, practiceAction } from './practice.js';
 import { createSwipe, moveSwipe, swipeGesture } from './swipe.js';
@@ -7,6 +7,7 @@ const $ = id => document.getElementById(id);
 const canvas = $('court');
 let swipe = null;
 let releaseCue={strength:0,state:'building'};
+let lastShot=null, strokeLayout=null;
 let drawCourt, drawLightCourt, lightView = false;
 function useLightView() {
   swipe = null;
@@ -33,7 +34,12 @@ async function api(route, body) {
 function render() {
   $('game').hidden = false;
   if(!game.solo)$('lobby').hidden = true;
-  $('mode-label').textContent = game.solo ? 'SOLO SHOOTAROUND' : 'TWO PLAYER GAME';
+  $('mode-label').textContent = game.solo ? game.drill ? 'SOLO FREE-THROW DRILL' : 'SOLO SHOOTAROUND' : 'TWO PLAYER GAME';
+  $('practice-modes').hidden=!game.solo;
+  $('drill-mode').setAttribute('aria-pressed',String(!!game.drill));
+  $('shootaround-mode').setAttribute('aria-pressed',String(!game.drill));
+  $('practice-mode-help').textContent=game.drill ? 'Repeat from the foul line after every shot. Stats stay with you.' : 'Catch rebounds and shoot from where you catch them.';
+  $('drill-mode').disabled=$('shootaround-mode').disabled=busy;
   $('multiplayer').hidden = !game.solo; $('practice').hidden = !!game.solo;
   $('resume').hidden = !game.solo || !id;
   $('reset-position').hidden = !game.solo;
@@ -47,7 +53,7 @@ function render() {
   updateRangeGuide();
   const value=shotValue(playerPosition());
   $('shot-location').textContent = `${Math.hypot(playerPosition().x,playerPosition().z).toFixed(1)} m from the hoop · ${value===2 ? 'foul line · 2 points' : '1 point'} · baskets return you to the foul line`;
-  $('turn-label').textContent = game.solo ? 'SOLO · FIND YOUR TOUCH' : game.phase === 'waiting' ? 'INVITE YOUR TEAMMATE' : yours ? 'YOUR TURN' : 'SAVED · WAITING FOR PLAYER';
+  $('turn-label').textContent = game.solo ? game.drill ? 'DRILL · BUILD YOUR TOUCH' : 'SOLO · FIND YOUR TOUCH' : game.phase === 'waiting' ? 'INVITE YOUR TEAMMATE' : yours ? 'YOUR TURN' : 'SAVED · WAITING FOR PLAYER';
   $('invite-row').hidden = !game.invite;
   if (game.invite) $('invite').value = `${location.origin}/#game=${game.id}&invite=${game.invite}`;
   $('shot-controls').hidden = !(yours && game.phase === 'shoot');
@@ -59,7 +65,7 @@ function render() {
     yours ? 'Make it count.' : `${game.players[game.turn]} is up next.`;
   $('instruction').textContent = game.solo && game.phase==='rebound' ? (playback ? 'Tap your moving ball to catch it. Your next shot starts right where you catch it.' : 'Replay the rebound, or return to the foul line.') : game.phase === 'waiting' ? 'Share the link below. You’ll take the first shot when they join.' :
     game.phase === 'rebound' ? (yours ? 'The saved bounce starts when you’re ready. Catch it to shoot from that spot.' : 'The other player can catch this bounce whenever they return.') :
-    yours ? `Press the ball, drag upward, then release. Short flicks for close shots; longer swipes from farther away.${game.solo?' Warm up solo or invite a friend.':''}` : 'You can leave and come back. This game stays right here.';
+    yours ? `Press the ball, follow the trail with a smooth upward stroke, then release while moving.${game.solo ? game.drill ? ' Repeat the same shot and use the feedback to adjust.' : ' Try the free-throw drill to build a feel for it.' : ''}` : 'You can leave and come back. This game stays right here.';
 }
 async function refresh() {
   if (!id || game.solo || busy || shot || playback) return;
@@ -94,7 +100,7 @@ async function loadMatch() {
 }
 function cancelInteractions() {
   if(swipe && canvas.hasPointerCapture(swipe.pointer))canvas.releasePointerCapture(swipe.pointer);
-  swipe=null;shot=null;playback=null;$('power').value=0;
+  swipe=null;shot=null;playback=null;lastShot=null;strokeLayout=null;$('shot-review').hidden=true;$('power').value=0;
 }
 $('resume').onclick = loadMatch;
 $('multiplayer').onclick = () => {
@@ -107,6 +113,13 @@ $('practice').onclick = () => {
 $('reset-position').onclick = async () => {
   if(busy)return;cancelInteractions();await action({action:'reset'});message('Back at the foul line.');
 };
+async function setDrill(enabled) {
+  if(busy || !game.solo)return;
+  cancelInteractions();await action({action:'drill',enabled});
+  message(enabled ? 'Free-throw drill: every attempt starts at the foul line.' : 'Shootaround: catch your rebounds and shoot from that spot.');
+}
+$('drill-mode').onclick=()=>setDrill(true);
+$('shootaround-mode').onclick=()=>setDrill(false);
 $('copy').onclick = async () => {
   try { await navigator.clipboard.writeText($('invite').value); message('Invite copied. Send it to your teammate.'); }
   catch { $('invite').select(); message('Select and copy the invite link above.'); }
@@ -116,10 +129,13 @@ async function takeShot(gesture) {
   if (!validGesture(gesture)) { message('Press the ball, move it slightly upward, then release to shoot.'); return; }
   const trajectory = simulateShot(gesture, playerPosition());
   shot = { trajectory, start: performance.now(), player: {...playerPosition()} };
-
+  lastShot={...shotLesson(gesture,shot.player),player:shot.player};
+  $('shot-review').hidden=false;
+  $('shot-outcome').textContent='LAST SHOT · IN FLIGHT';
+  $('shot-feedback').textContent=lastShot.summary;
+  $('shot-adjustment').textContent=lastShot.tip;
   const result = await action({ action: 'shoot', gesture });
-  if (!result) shot = null;
-  $('shot-feedback').textContent = 'Shot released';
+  if (!result) {shot=null;lastShot=null;$('shot-review').hidden=true;}
 }
 $('start-rebound').onclick = async () => {
   const result = await action({ action: 'start' });
@@ -139,6 +155,7 @@ canvas.addEventListener('pointerdown', event => {
   const ball = project({ x: player.x, y: 1.6, z: player.z },player);
   if (swipe || !canShoot() || Math.hypot(point.x - ball.x, point.y - ball.y) > .1) return;
   event.preventDefault(); canvas.setPointerCapture(event.pointerId);
+  lastShot=null;$('shot-review').hidden=true;
   swipe = createSwipe(point, event.timeStamp, event.pointerId);
   updateRangeGuide(event.timeStamp);
   message(''); canvas.focus();
@@ -166,24 +183,61 @@ canvas.addEventListener('blur', () => { swipe=null;$('power').value=0; });
 window.addEventListener('blur', () => { swipe=null;$('power').value=0; });
 function updateRangeGuide(time=performance.now()) {
   const display=$('range-display');
-  display.hidden=!canShoot();
+  const ready=canShoot(),frozen=!!lastShot && !swipe;
+  updateStrokeGuide(ready,time);
+  display.hidden=!ready && !frozen;
   if(display.hidden){releaseCue={strength:0,state:'building'};return;}
-  const player=playerPosition();
-  const gesture=swipe ? swipeGesture(swipe,time) : null;
-  const feedback=releaseFeedback(gesture,player);
+  const player=frozen ? lastShot.player : playerPosition();
+  const gesture=ready && swipe ? swipeGesture(swipe,time) : null;
+  const feedback=frozen ? lastShot : releaseFeedback(gesture,player);
   const {guide,speed,inRange,onTarget:aligned}=feedback;
-  releaseCue={strength:feedback.strength,state:feedback.state};
+  releaseCue=gesture ? {strength:feedback.strength,state:feedback.state} : {strength:0,state:'building'};
   const distance=Math.hypot(player.x,player.z);
-  display.querySelector('.range-title').textContent=distance<=2 ? 'LAYUP' : 'RANGE';
+  display.querySelector('.range-title').textContent=frozen ? 'LAST SHOT' : distance<=2 ? 'LAYUP' : 'RANGE';
+  display.classList.toggle('frozen',frozen);
   display.style.setProperty('--target-level',`${guide.speed/MAX_SHOT_SPEED*100}%`);
   display.style.setProperty('--zone-bottom',`${guide.minSpeed/MAX_SHOT_SPEED*100}%`);
   display.style.setProperty('--zone-height',`${(guide.maxSpeed-guide.minSpeed)/MAX_SHOT_SPEED*100}%`);
   display.style.setProperty('--power-level',`${speed/MAX_SHOT_SPEED*100}%`);
   display.classList.toggle('aligned',!!aligned);
   $('range-distance').textContent=`${distance.toFixed(1)} m`;
-  $('range-status').textContent=!gesture ? 'Hold ball' : gesture.dy<MIN_SWIPE_DISTANCE ? 'Move upward' : aligned ? 'On target' : inRange ? 'Aim straight' : speed>guide.maxSpeed ? 'Shorter / slower' : 'Longer / faster';
+  $('range-status').textContent=frozen ? lastShot.power==='good' ? 'Power good' : lastShot.power==='strong' ? 'Too strong' : 'Too weak' : !gesture ? 'Hold ball' : gesture.dy<MIN_SWIPE_DISTANCE ? 'Move upward' : aligned ? 'On target' : inRange ? 'Aim straight' : speed>guide.maxSpeed ? 'Shorter / slower' : 'Longer / faster';
   $('power').value=speed;
   $('power').setAttribute('aria-valuetext',`${speed.toFixed(1)} meters per second; target ${guide.speed.toFixed(1)}`);
+}
+function updateStrokeGuide(ready,time) {
+  const overlay=$('stroke-guide');
+  overlay.toggleAttribute('hidden',!ready);
+  $('court-hint').hidden=!ready;
+  if(!ready)return;
+  const player=playerPosition(),guide=strokeGuide(player);
+  const ball=project({x:player.x,y:1.6,z:player.z},player);
+  const start=swipe?.from || ball;
+  const x=start.x*700,y=start.y*650,target=(start.y-guide.length)*650;
+  const key=`${x},${y},${guide.length}`;
+  if(strokeLayout!==key) {
+    strokeLayout=key;
+    $('stroke-path').setAttribute('d',`M ${x} ${y} L ${x} ${target}`);
+    $('stroke-zone').setAttribute('x',x-13);
+    $('stroke-zone').setAttribute('y',(start.y-guide.maxLength)*650);
+    $('stroke-zone').setAttribute('height',Math.max(2,(guide.maxLength-guide.minLength)*650));
+    $('stroke-target').setAttribute('cx',x);$('stroke-target').setAttribute('cy',target);
+    $('stroke-label').setAttribute('x',x+24);$('stroke-label').setAttribute('y',target+5);
+    $('stroke-demo').setAttribute('cx',x);
+    // Restart the demonstration when its layout changes.
+    overlay.dataset.start=String(time);
+  }
+  $('stroke-demo').style.display=swipe ? 'none' : '';
+  if(!swipe) {
+    const age=Math.max(0,time-Number(overlay.dataset.start))/1000;
+    const progress=Math.min(1,(age%(guide.duration+1.1))/guide.duration);
+    $('stroke-demo').setAttribute('cy',y-guide.length*650*progress);
+    $('court-hint').textContent=`Follow the dot’s pace · ${guide.duration.toFixed(1)}-second stroke`;
+  } else {
+    $('court-hint').textContent='Smooth upward · release while moving';
+    $('stroke-input').setAttribute('d',`M ${x} ${y} L ${swipe.to.x*700} ${swipe.to.y*650}`);
+  }
+  $('stroke-input').style.display=swipe ? '' : 'none';
 }
 function draw() {
   let player=playerPosition(),position={x:player.x,y:1.6,z:player.z},focus=null,netState=netResponse(null,0);
@@ -194,10 +248,10 @@ function draw() {
     position=sampleFrames(shot.trajectory.flight,elapsed);focus=position;
     if(elapsed>=shot.trajectory.flightDuration) {
       const made=shot.trajectory.made;
-      message(made?`Bucket! ${shot.trajectory.points} ${shot.trajectory.points===1 ? 'point' : 'points'}. Back to the foul line.`:game.solo ? `${shot.trajectory.feedback}. Tap your rebound or return to the foul line.` : `${shot.trajectory.feedback}. Rebound saved for the other player.`);
-      $('shot-feedback').textContent=shot.trajectory.feedback;
-      shot=null;
-      if(game.solo && !made){practiceAction(game,{action:'start'});playback={start:performance.now(),trajectory:game.trajectory};}
+      message(made?`Bucket! ${shot.trajectory.points} ${shot.trajectory.points===1 ? 'point' : 'points'}. Back to the foul line.`:game.solo ? game.drill ? `${shot.trajectory.feedback}. Try again from the foul line.` : `${shot.trajectory.feedback}. Tap your rebound or return to the foul line.` : `${shot.trajectory.feedback}. Rebound saved for the other player.`);
+      $('shot-outcome').textContent=made ? `BASKET · ${shot.trajectory.points} ${shot.trajectory.points===1 ? 'POINT' : 'POINTS'}` : 'LAST SHOT · MISS';
+      shot=null;strokeLayout=null;
+      if(game.solo && !game.drill && !made){practiceAction(game,{action:'start'});playback={start:performance.now(),trajectory:game.trajectory};}
       render();
     }
   } else if(game?.phase==='rebound') {

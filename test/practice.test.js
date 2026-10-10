@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createPractice,practiceAction} from '../public/practice.js';
-import {reboundPosition,reboundWorld,START_POSITION} from '../public/physics.js';
+import {reboundPosition,reboundWorld,START_POSITION,strokeGuide} from '../public/physics.js';
 
 test('solo shootaround needs no second player, counts baskets, and allows another shot',()=>{
   const game=createPractice();
@@ -51,4 +51,28 @@ test('returning to the starting spot keeps practice stats and changes no multipl
   practiceAction(first,{action:'reset'});
   assert.deepEqual(first.positions[0],START_POSITION);assert.equal(first.phase,'shoot');assert.equal(first.attempts,1);
   assert.equal(other.attempts,0);assert.deepEqual(other.positions[0],START_POSITION);
+});
+
+test('free-throw drill repeats both misses and baskets at the foul line and keeps stats',()=>{
+  const game=createPractice(),other=createPractice();
+  practiceAction(game,{action:'shoot',gesture:{dx:.2,dy:.35,duration:.175}});
+  practiceAction(game,{action:'drill',enabled:true});
+  assert.equal(game.drill,true);assert.equal(game.phase,'shoot');assert.equal(game.trajectory,null);
+  assert.equal(game.attempts,1);assert.deepEqual(game.positions[0],START_POSITION);
+  for(const gesture of[{dx:0,dy:.02,duration:.5,velocity:.9},{dx:.2,dy:.4,duration:.44,velocity:.9}]) {
+    practiceAction(game,{action:'shoot',gesture});
+    assert.equal(game.phase,'shoot');assert.deepEqual(game.positions[0],START_POSITION);
+    assert.equal(game.trajectory,null);assert.equal(game.startedAt,null);assert.equal(game.rebounds[0],0);
+    assert.throws(()=>practiceAction(game,{action:'start'}),/unavailable/);
+  }
+  const guide=strokeGuide();
+  practiceAction(game,{action:'shoot',gesture:{dx:0,dy:guide.length,duration:guide.duration,velocity:guide.velocity}});
+  assert.equal(game.attempts,4);assert.equal(game.scores[0],2);assert.equal(game.baskets,1);
+  assert.equal(game.phase,'shoot');assert.deepEqual(game.positions[0],START_POSITION);
+  practiceAction(game,{action:'drill',enabled:false});
+  practiceAction(game,{action:'shoot',gesture:{dx:0,dy:.02,duration:.5,velocity:.9}});
+  assert.equal(game.phase,'rebound');assert.ok(game.trajectory);assert.equal(game.attempts,5);
+  assert.equal(game.scores[0],2);assert.equal(game.baskets,1);
+  assert.equal(other.drill,false);assert.equal(other.attempts,0);
+  assert.throws(()=>practiceAction(game,{action:'drill',enabled:'true'}),/practice mode/);
 });
