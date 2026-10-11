@@ -1,6 +1,7 @@
 import { reboundPosition, reboundDuration, simulateShot, validGesture, sampleFrames, project, reboundWorld, START_POSITION, courtPosition, releaseFeedback, strokeGuide, shotLesson, shotValue, MAX_SHOT_SPEED, MIN_SWIPE_DISTANCE, netResponse } from './physics.js';
 import { createCourt, pointerPosition } from './court3d.js';
 import { createPractice, practiceAction } from './practice.js';
+import { createComputerMatch, computerAction, computerGesture, computerCatchTime, COMPUTER_LEVELS } from './computer.js';
 import { createSwipe, moveSwipe, swipeGesture } from './swipe.js';
 import { createLightCourt } from './light-court.js';
 const $ = id => document.getElementById(id);
@@ -19,7 +20,7 @@ catch { useLightView(); }
 const playerPosition = () => courtPosition(game?.positions?.[game.seat] || START_POSITION);
 const params = new URLSearchParams(location.hash.slice(1));
 let id = params.get('game') || localStorage.getItem('webball-game');
-let practice = createPractice(), game = practice, busy = false, playback = null, shot = null;
+let practice = createPractice(), computer = null, game = practice, busy = false, playback = null, shot = null, computerNext = null;
 let invite = params.get('invite'), inviteId = params.get('game');
 const message = text => { $('message').textContent = text; };
 async function api(route, body) {
@@ -34,38 +35,45 @@ async function api(route, body) {
 function render() {
   $('game').hidden = false;
   if(!game.solo)$('lobby').hidden = true;
-  $('mode-label').textContent = game.solo ? game.drill ? 'SOLO FREE-THROW DRILL' : 'SOLO SHOOTAROUND' : 'TWO PLAYER GAME';
+  const againstComputer=!!game.computer,finished=againstComputer && game.winner!==null && !shot;
+  $('mode-label').textContent = againstComputer ? 'YOU VS COMPUTER' : game.solo ? game.drill ? 'SOLO FREE-THROW DRILL' : 'SOLO SHOOTAROUND' : 'TWO PLAYER GAME';
   $('practice-modes').hidden=!game.solo;
   $('drill-mode').setAttribute('aria-pressed',String(!!game.drill));
-  $('shootaround-mode').setAttribute('aria-pressed',String(!game.drill));
-  $('practice-mode-help').textContent=game.drill ? 'Repeat from the foul line after every shot. Stats stay with you.' : 'Catch rebounds and shoot from where you catch them.';
-  $('drill-mode').disabled=$('shootaround-mode').disabled=busy;
+  $('shootaround-mode').setAttribute('aria-pressed',String(!againstComputer && !game.drill));
+  $('computer-mode').setAttribute('aria-pressed',String(againstComputer));
+  $('practice-mode-help').textContent=againstComputer ? 'First to 11. Take turns; catch the other player’s miss to shoot from that spot.' : game.drill ? 'Repeat from the foul line after every shot. Stats stay with you.' : 'Catch rebounds and shoot from where you catch them.';
+  $('drill-mode').disabled=$('shootaround-mode').disabled=$('computer-mode').disabled=busy;
+  $('computer-controls').hidden=!againstComputer;
+  $('new-match').textContent=finished ? 'Play again →' : 'New match';
+  $('new-match').disabled=$('computer-difficulty').disabled=busy;
+  $('match-banner').hidden=!againstComputer;
   $('multiplayer').hidden = !game.solo; $('practice').hidden = !!game.solo;
   $('resume').hidden = !game.solo || !id;
-  $('reset-position').hidden = !game.solo;
+  $('reset-position').hidden = !game.solo || againstComputer;
   for (let i = 0; i < 2; i++) {
-    $(`p${i}`).textContent = (game.players[i] || 'Waiting for player') + (game.seat === i ? ' · YOU' : '');
+    $(`p${i}`).textContent = (game.players[i] || 'Waiting for player') + (!game.solo && game.seat === i ? ' · YOU' : '');
     $(`s${i}`).textContent = game.scores[i]; $(`r${i}`).textContent = `${game.rebounds[i]} ${game.rebounds[i] === 1 ? 'rebound' : 'rebounds'}`;
   }
-  if(game.solo) { $('p0').textContent='YOU'; $('p1').textContent='SHOTS'; $('s1').textContent=game.attempts; $('r1').textContent=`${game.attempts ? Math.round(game.baskets/game.attempts*100) : 0}% made`; }
-  document.querySelector('.versus').textContent=game.solo?'·':'VS';
+  if(game.solo && !againstComputer) { $('p0').textContent='YOU'; $('p1').textContent='SHOTS'; $('s1').textContent=game.attempts; $('r1').textContent=`${game.attempts ? Math.round(game.baskets/game.attempts*100) : 0}% made`; }
+  document.querySelector('.versus').textContent=game.solo && !againstComputer?'·':'VS';
   const yours = game.turn === game.seat;
   updateRangeGuide();
   const value=shotValue(playerPosition());
   $('shot-location').textContent = `${Math.hypot(playerPosition().x,playerPosition().z).toFixed(1)} m from the hoop · ${value===2 ? 'foul line · 2 points' : '1 point'} · baskets return you to the foul line`;
-  $('turn-label').textContent = game.solo ? game.drill ? 'DRILL · BUILD YOUR TOUCH' : 'SOLO · FIND YOUR TOUCH' : game.phase === 'waiting' ? 'INVITE YOUR TEAMMATE' : yours ? 'YOUR TURN' : 'SAVED · WAITING FOR PLAYER';
+  $('turn-label').textContent = againstComputer ? finished ? 'MATCH COMPLETE' : yours ? 'YOUR TURN' : 'COMPUTER’S TURN' : game.solo ? game.drill ? 'DRILL · BUILD YOUR TOUCH' : 'SOLO · FIND YOUR TOUCH' : game.phase === 'waiting' ? 'INVITE YOUR TEAMMATE' : yours ? 'YOUR TURN' : 'SAVED · WAITING FOR PLAYER';
   $('invite-row').hidden = !game.invite;
   if (game.invite) $('invite').value = `${location.origin}/#game=${game.id}&invite=${game.invite}`;
-  $('shot-controls').hidden = !(yours && game.phase === 'shoot');
-  $('start-rebound').hidden = !(yours && game.phase === 'rebound' && !playback);
+  $('shot-controls').hidden = !(yours && game.phase === 'shoot' && !shot);
+  $('start-rebound').hidden = !(yours && game.phase === 'rebound' && !playback && !shot);
   $('start-rebound').textContent = game.startedAt === null ? 'Play the rebound →' : 'Replay the rebound →';
-  $('catch-help').hidden = !playback;
-  $('status').textContent = game.solo ? (game.phase==='rebound' ? playback ? 'Chase your rebound.' : 'Your rebound is waiting.' : 'The court is yours.') : game.phase === 'waiting' ? 'Good games need two.' :
+  $('catch-help').hidden = !playback || !yours;
+  $('status').textContent = againstComputer ? finished ? game.winner===0 ? 'You win!' : 'Computer wins. Rematch?' : shot ? shot.seat===1 ? 'Computer is shooting.' : 'Your shot is in the air.' : yours ? game.phase==='rebound' ? 'Catch the computer’s miss!' : 'Your shot.' : game.phase==='rebound' ? 'Computer is chasing your rebound.' : 'Computer is lining up a shot.' : game.solo ? (game.phase==='rebound' ? playback ? 'Chase your rebound.' : 'Your rebound is waiting.' : 'The court is yours.') : game.phase === 'waiting' ? 'Good games need two.' :
     game.phase === 'rebound' ? (yours ? playback ? 'Get that rebound!' : 'A rebound is waiting for you.' : 'Your miss is saved.') :
     yours ? 'Make it count.' : `${game.players[game.turn]} is up next.`;
-  $('instruction').textContent = game.solo && game.phase==='rebound' ? (playback ? 'Tap your moving ball to catch it. Your next shot starts right where you catch it.' : 'Replay the rebound, or return to the foul line.') : game.phase === 'waiting' ? 'Share the link below. You’ll take the first shot when they join.' :
+  $('instruction').textContent = againstComputer ? finished ? `Final score: ${game.scores[0]}–${game.scores[1]}. Choose Play again for a new match.` : shot ? 'Watch the shot. Foul-line baskets earn 2 points; other baskets earn 1.' : yours ? game.phase==='rebound' ? 'Tap the moving ball to catch it. Your next shot starts where you catch it.' : 'Press the ball, swipe upward and release. First to 11 wins.' : 'The computer uses the same court and bounces. Its misses become your rebounds.' : game.solo && game.phase==='rebound' ? (playback ? 'Tap your moving ball to catch it. Your next shot starts right where you catch it.' : 'Replay the rebound, or return to the foul line.') : game.phase === 'waiting' ? 'Share the link below. You’ll take the first shot when they join.' :
     game.phase === 'rebound' ? (yours ? 'The saved bounce starts when you’re ready. Catch it to shoot from that spot.' : 'The other player can catch this bounce whenever they return.') :
     yours ? `Press the ball, follow the trail with a smooth upward stroke, then release while moving.${game.solo ? game.drill ? ' Repeat the same shot and use the feedback to adjust.' : ' Try the free-throw drill to build a feel for it.' : ''}` : 'You can leave and come back. This game stays right here.';
+  if(againstComputer)$('match-banner').textContent=`${finished ? game.winner===0 ? 'YOU WIN' : 'COMPUTER WINS' : shot ? shot.seat===1 ? 'COMPUTER SHOOTING' : 'YOUR SHOT' : yours ? game.phase==='rebound' ? 'YOUR REBOUND' : 'YOUR TURN' : game.phase==='rebound' ? 'COMPUTER REBOUND' : 'COMPUTER’S TURN'} · ${COMPUTER_LEVELS[game.difficulty].label} · first to ${game.target}`;
 }
 async function refresh() {
   if (!id || game.solo || busy || shot || playback) return;
@@ -75,7 +83,7 @@ async function refresh() {
 async function action(body) {
   if (busy) return null;
   busy = true; $('start-rebound').disabled = true;
-  try { game = game.solo ? practiceAction(game,body) : await api('action', { ...body, version: game.version }); message(''); return game; }
+  try { game = game.computer ? computerAction(game,body) : game.solo ? practiceAction(game,body) : await api('action', { ...body, version: game.version }); message(''); return game; }
   catch (error) { message(error.message); return null; }
   finally { busy = false; $('start-rebound').disabled = false; render(); }
 }
@@ -100,7 +108,7 @@ async function loadMatch() {
 }
 function cancelInteractions() {
   if(swipe && canvas.hasPointerCapture(swipe.pointer))canvas.releasePointerCapture(swipe.pointer);
-  swipe=null;shot=null;playback=null;lastShot=null;strokeLayout=null;$('shot-review').hidden=true;$('power').value=0;
+  swipe=null;shot=null;playback=null;lastShot=null;strokeLayout=null;computerNext=null;$('shot-review').hidden=true;$('power').value=0;
 }
 $('resume').onclick = loadMatch;
 $('multiplayer').onclick = () => {
@@ -111,15 +119,27 @@ $('practice').onclick = () => {
   if(busy)return;cancelInteractions();game=practice;history.replaceState(null,'','/');message('');render();
 };
 $('reset-position').onclick = async () => {
-  if(busy)return;cancelInteractions();await action({action:'reset'});message('Back at the foul line.');
+  if(busy || !game.solo || game.computer)return;cancelInteractions();await action({action:'reset'});message('Back at the foul line.');
 };
 async function setDrill(enabled) {
   if(busy || !game.solo)return;
-  cancelInteractions();await action({action:'drill',enabled});
+  cancelInteractions();game=practice;await action({action:'drill',enabled});
   message(enabled ? 'Free-throw drill: every attempt starts at the foul line.' : 'Shootaround: catch your rebounds and shoot from that spot.');
 }
 $('drill-mode').onclick=()=>setDrill(true);
 $('shootaround-mode').onclick=()=>setDrill(false);
+$('computer-mode').onclick=()=>{
+  if(busy || game.computer)return;
+  cancelInteractions();computer ||= createComputerMatch($('computer-difficulty').value);game=computer;
+  history.replaceState(null,'','/');message(game.winner!==null ? 'Match complete. Choose Play again for a rematch.' : 'First to 11 wins!');render();
+};
+function newComputerMatch() {
+  if(busy || !game.computer)return;
+  cancelInteractions();computer=createComputerMatch($('computer-difficulty').value);game=computer;
+  message('New match. Your ball!');render();
+}
+$('new-match').onclick=newComputerMatch;
+$('computer-difficulty').onchange=newComputerMatch;
 $('copy').onclick = async () => {
   try { await navigator.clipboard.writeText($('invite').value); message('Invite copied. Send it to your teammate.'); }
   catch { $('invite').select(); message('Select and copy the invite link above.'); }
@@ -128,7 +148,7 @@ async function takeShot(gesture) {
   if (busy || shot || !game || game.phase !== 'shoot' || game.turn !== game.seat) return;
   if (!validGesture(gesture)) { message('Press the ball, move it slightly upward, then release to shoot.'); return; }
   const trajectory = simulateShot(gesture, playerPosition());
-  shot = { trajectory, start: performance.now(), player: {...playerPosition()} };
+  shot = { trajectory, start: performance.now(), player: {...playerPosition()}, seat:game.seat };
   lastShot={...shotLesson(gesture,shot.player),player:shot.player};
   $('shot-review').hidden=false;
   $('shot-outcome').textContent='LAST SHOT · IN FLIGHT';
@@ -138,11 +158,12 @@ async function takeShot(gesture) {
   if (!result) {shot=null;lastShot=null;$('shot-review').hidden=true;}
 }
 $('start-rebound').onclick = async () => {
+  if(shot || busy || game.turn!==game.seat || game.phase!=='rebound')return;
   const result = await action({ action: 'start' });
-  if (result) { playback = { start: performance.now(), trajectory: result.trajectory }; render(); canvas.focus(); }
+  if (result) { playback = { start: performance.now(), trajectory: result.trajectory, seat:result.turn }; render(); canvas.focus(); }
 };
 async function catchBall(x, y) {
-  if (!playback || busy) return;
+  if (!playback || shot || busy || game.turn!==game.seat) return;
   const result = await action({ action: 'catch', x, y });
   if (result) { playback = null; message('Rebound caught. Shoot from this spot!'); render(); }
 }
@@ -239,8 +260,43 @@ function updateStrokeGuide(ready,time) {
   }
   $('stroke-input').style.display=swipe ? '' : 'none';
 }
+function startLocalRebound(time) {
+  if(game.phase!=='rebound' || !game.trajectory)return;
+  const seat=game.turn;
+  if(game.computer)computerAction(game,{action:'start'},Date.now(),seat);
+  else practiceAction(game,{action:'start'});
+  playback={start:time,trajectory:game.trajectory,seat,
+    catchAt:seat===1 ? computerCatchTime(game.trajectory) : null};
+  render();
+}
+function advanceComputer(time) {
+  if(!game.computer || document.hidden || busy || shot || game.phase==='finished' || game.turn!==1)return;
+  if(game.phase==='rebound') {
+    if(!playback)startLocalRebound(time);
+    const elapsed=time-playback.start;
+    if(elapsed>reboundDuration(playback.trajectory)){startLocalRebound(time);return;}
+    if(elapsed>=playback.catchAt && reboundWorld(playback.trajectory,elapsed).y<=2.15) {
+      const point=reboundPosition(playback.trajectory,elapsed,game.positions[1]);
+      computerAction(game,{action:'catch',...point},game.startedAt+elapsed,1);
+      playback=null;message('Computer caught the rebound.');render();
+    }
+    return;
+  }
+  if(!computerNext || computerNext.game!==game || computerNext.version!==game.version)
+    computerNext={game,version:game.version,at:time+1100};
+  if(time<computerNext.at)return;
+  computerNext=null;
+  const player={...game.positions[1]},gesture=computerGesture(player,game.difficulty);
+  const trajectory=simulateShot(gesture,player);
+  shot={trajectory,start:time,player,seat:1};
+  computerAction(game,{action:'shoot',gesture},Date.now(),1);
+  message('Computer takes a shot.');render();
+}
 function draw() {
-  let player=playerPosition(),position={x:player.x,y:1.6,z:player.z},focus=null,netState=netResponse(null,0);
+  const time=performance.now();
+  advanceComputer(time);
+  let player=game.computer && game.turn===1 ? courtPosition(game.positions[1]) : playerPosition();
+  let position={x:player.x,y:1.6,z:player.z},focus=null,netState=netResponse(null,0);
   if(shot) {
     player=shot.player;
     const elapsed=performance.now()-shot.start;
@@ -248,10 +304,12 @@ function draw() {
     position=sampleFrames(shot.trajectory.flight,elapsed);focus=position;
     if(elapsed>=shot.trajectory.flightDuration) {
       const made=shot.trajectory.made;
-      message(made?`Bucket! ${shot.trajectory.points} ${shot.trajectory.points===1 ? 'point' : 'points'}. Back to the foul line.`:game.solo ? game.drill ? `${shot.trajectory.feedback}. Try again from the foul line.` : `${shot.trajectory.feedback}. Tap your rebound or return to the foul line.` : `${shot.trajectory.feedback}. Rebound saved for the other player.`);
-      $('shot-outcome').textContent=made ? `BASKET · ${shot.trajectory.points} ${shot.trajectory.points===1 ? 'POINT' : 'POINTS'}` : 'LAST SHOT · MISS';
+      const opponent=game.computer && shot.seat===1;
+      message(game.computer ? made ? `${opponent ? 'Computer scores' : 'Bucket!'} ${shot.trajectory.points} ${shot.trajectory.points===1 ? 'point' : 'points'}.` : opponent ? 'Computer missed. Catch its rebound!' : 'You missed. Computer gets the rebound.' : made?`Bucket! ${shot.trajectory.points} ${shot.trajectory.points===1 ? 'point' : 'points'}. Back to the foul line.`:game.solo ? game.drill ? `${shot.trajectory.feedback}. Try again from the foul line.` : `${shot.trajectory.feedback}. Tap your rebound or return to the foul line.` : `${shot.trajectory.feedback}. Rebound saved for the other player.`);
+      if(!opponent)$('shot-outcome').textContent=made ? `BASKET · ${shot.trajectory.points} ${shot.trajectory.points===1 ? 'POINT' : 'POINTS'}` : 'LAST SHOT · MISS';
       shot=null;strokeLayout=null;
-      if(game.solo && !game.drill && !made){practiceAction(game,{action:'start'});playback={start:performance.now(),trajectory:game.trajectory};}
+      if(game.solo && !game.drill && !made)startLocalRebound(performance.now());
+      if(game.computer && game.winner!==null)message(game.winner===0 ? `You win ${game.scores[0]}–${game.scores[1]}!` : `Computer wins ${game.scores[1]}–${game.scores[0]}. Try a rematch!`);
       render();
     }
   } else if(game?.phase==='rebound') {
