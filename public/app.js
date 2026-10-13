@@ -41,7 +41,7 @@ function render() {
   $('drill-mode').setAttribute('aria-pressed',String(!!game.drill));
   $('shootaround-mode').setAttribute('aria-pressed',String(!againstComputer && !game.drill));
   $('computer-mode').setAttribute('aria-pressed',String(againstComputer));
-  $('practice-mode-help').textContent=againstComputer ? 'First to 11. Take turns; catch the other player’s miss to shoot from that spot.' : game.drill ? 'Repeat from the foul line after every shot. Stats stay with you.' : 'Catch rebounds and shoot from where you catch them.';
+  $('practice-mode-help').textContent=againstComputer ? 'First to 11. Score to keep shooting; a miss gives the other player the rebound.' : game.drill ? 'Repeat from the foul line after every shot. Stats stay with you.' : 'Catch rebounds and shoot from where you catch them.';
   $('drill-mode').disabled=$('shootaround-mode').disabled=$('computer-mode').disabled=busy;
   $('computer-controls').hidden=!againstComputer;
   $('new-match').textContent=finished ? 'Play again →' : 'New match';
@@ -305,7 +305,7 @@ function draw() {
     if(elapsed>=shot.trajectory.flightDuration) {
       const made=shot.trajectory.made;
       const opponent=game.computer && shot.seat===1;
-      message(game.computer ? made ? `${opponent ? 'Computer scores' : 'Bucket!'} ${shot.trajectory.points} ${shot.trajectory.points===1 ? 'point' : 'points'}.` : opponent ? 'Computer missed. Catch its rebound!' : 'You missed. Computer gets the rebound.' : made?`Bucket! ${shot.trajectory.points} ${shot.trajectory.points===1 ? 'point' : 'points'}. Back to the foul line.`:game.solo ? game.drill ? `${shot.trajectory.feedback}. Try again from the foul line.` : `${shot.trajectory.feedback}. Tap your rebound or return to the foul line.` : `${shot.trajectory.feedback}. Rebound saved for the other player.`);
+      message(game.computer ? made ? `${opponent ? 'Computer scores' : 'Bucket!'} ${shot.trajectory.points} ${shot.trajectory.points===1 ? 'point' : 'points'}. ${opponent ? 'Computer shoots again.' : 'Your ball again! Back to the foul line.'}` : opponent ? 'Computer missed. Catch its rebound!' : 'You missed. Computer gets the rebound.' : made?`Bucket! ${shot.trajectory.points} ${shot.trajectory.points===1 ? 'point' : 'points'}. Back to the foul line. Your ball again!`:game.solo ? game.drill ? `${shot.trajectory.feedback}. Try again from the foul line.` : `${shot.trajectory.feedback}. Tap your rebound or return to the foul line.` : `${shot.trajectory.feedback}. Rebound saved for the other player.`);
       if(!opponent)$('shot-outcome').textContent=made ? `BASKET · ${shot.trajectory.points} ${shot.trajectory.points===1 ? 'POINT' : 'POINTS'}` : 'LAST SHOT · MISS';
       shot=null;strokeLayout=null;
       if(game.solo && !game.drill && !made)startLocalRebound(performance.now());

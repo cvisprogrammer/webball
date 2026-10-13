@@ -26,7 +26,6 @@ export function computerAction(game,body,now=Date.now(),seat=game.seat) {
       game.scores[seat]+=trajectory.points;game.baskets[seat]++;
       game.positions=[{...START_POSITION},{...START_POSITION}];game.trajectory=null;game.startedAt=null;
       if(game.scores[seat]>=game.target){game.winner=seat;game.phase='finished';}
-      else game.turn=1-seat;
     } else {
       game.trajectory=trajectory;game.turn=1-seat;game.phase='rebound';game.startedAt=null;
     }

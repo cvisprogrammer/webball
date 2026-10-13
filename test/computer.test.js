@@ -16,15 +16,32 @@ test('computer matches start locally with two scores and enforce whose turn it i
   assert.throws(()=>computerAction(match,{action:'shoot',gesture:good()},1000,1),/other player/);
   assert.throws(()=>computerAction(match,{action:'shoot',gesture:{dx:0,dy:0,duration:1}}),/Press the ball/);
   computerAction(match,{action:'shoot',gesture:good(),points:100,origin:{x:0,z:1}},1000);
-  assert.deepEqual(match.scores,[2,0]);assert.equal(match.turn,1);assert.equal(match.phase,'shoot');
-  assert.throws(()=>computerAction(match,{action:'shoot',gesture:good()}),/other player/);
-  computerAction(match,{action:'shoot',gesture:good()},2000,1);
-  assert.deepEqual(match.scores,[2,2]);assert.equal(match.turn,0);
-  assert.deepEqual(match.attempts,[1,1]);assert.deepEqual(match.baskets,[1,1]);
+  assert.deepEqual(match.scores,[2,0]);assert.equal(match.turn,0);assert.equal(match.phase,'shoot');
+  assert.throws(()=>computerAction(match,{action:'shoot',gesture:good()},2000,1),/other player/);
+  computerAction(match,{action:'shoot',gesture:good()},2000);
+  assert.deepEqual(match.scores,[4,0]);assert.equal(match.turn,0);
+  assert.deepEqual(match.attempts,[2,0]);assert.deepEqual(match.baskets,[2,0]);
   assert.deepEqual(practice.scores,[0,0]);assert.equal(practice.attempts,0);
   assert.throws(()=>createComputerMatch('unknown'),/difficulty/);
   assert.throws(()=>createComputerMatch('__proto__'),/difficulty/);
   assert.throws(()=>computerAction(match,{action:'reset'}),/unavailable/);
+});
+
+test('either player keeps shooting after baskets until a miss passes the rebound',()=>{
+  for(const seat of[0,1]) {
+    const match=createComputerMatch();match.turn=seat;
+    for(let i=0;i<2;i++) {
+      computerAction(match,{action:'shoot',gesture:good()},1000+i*1000,seat);
+      assert.equal(match.turn,seat);assert.equal(match.phase,'shoot');
+      assert.equal(match.scores[seat],(i+1)*2);assert.equal(match.scores[1-seat],0);
+      assert.deepEqual(match.positions,[START_POSITION,START_POSITION]);
+      assert.throws(()=>computerAction(match,{action:'shoot',gesture:good()},2500,1-seat),/other player/);
+    }
+    computerAction(match,{action:'shoot',gesture:miss},3000,seat);
+    assert.equal(match.turn,1-seat);assert.equal(match.phase,'rebound');
+    assert.equal(match.scores[seat],4);assert.ok(match.trajectory);
+    assert.throws(()=>computerAction(match,{action:'start'},4000,seat),/other player/);
+  }
 });
 
 test('both players must catch the other player’s actual rebound and shoot from that location',()=>{
@@ -65,9 +82,9 @@ test('foul shots earn two, other shots earn one, and either player can finish a 
     const match=createComputerMatch();match.turn=seat;match.scores[seat]=8;
     match.positions[seat]={x:0,z:1};
     computerAction(match,{action:'shoot',gesture:good(match.positions[seat])},1000,seat);
-    assert.equal(match.scores[seat],9);assert.equal(match.winner,null);
+    assert.equal(match.scores[seat],9);assert.equal(match.winner,null);assert.equal(match.turn,seat);
     assert.deepEqual(match.positions,[START_POSITION,START_POSITION]);
-    computerAction(match,{action:'shoot',gesture:good()},2000,1-seat);
+    assert.throws(()=>computerAction(match,{action:'shoot',gesture:good()},2000,1-seat),/other player/);
     computerAction(match,{action:'shoot',gesture:good()},3000,seat);
     assert.equal(match.scores[seat],11);assert.equal(match.winner,seat);assert.equal(match.phase,'finished');
     assert.throws(()=>computerAction(match,{action:'shoot',gesture:good()},4000,1-seat),/ended/);
