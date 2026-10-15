@@ -108,9 +108,24 @@ export function reboundWorld(trajectory, elapsed) {
   return { ...courtPosition(ball), y: clamp(Number.isFinite(ball.y) ? ball.y : BALL_RADIUS, BALL_RADIUS, COURT_BOUNDS.maxY) };
 }
 export function reboundPosition(trajectory,elapsed,player=START_POSITION) {
-  const ball=reboundWorld(trajectory,elapsed);return project(ball,player,ball);
+  const ball=reboundWorld(trajectory,elapsed);return project(ball,reboundPlayer(trajectory,player),ball);
 }
+export const reboundPlayer = (trajectory,player=START_POSITION) => courtPosition(trajectory.origin ?? player);
 export const reboundDuration = trajectory => trajectory.frames ? trajectory.duration : REBOUND_DURATION;
+export function repairRebound(trajectory) {
+  if(trajectory?.version!==12 || trajectory.made || !trajectory.flight?.length || !trajectory.frames?.length)return trajectory;
+  const end=trajectory.flight.at(-1),nearEdge=Math.min(Math.abs(end[1]-COURT_BOUNDS.minX),Math.abs(end[1]-COURT_BOUNDS.maxX),Math.abs(end[3]-COURT_BOUNDS.minZ),Math.abs(end[3]-COURT_BOUNDS.maxZ))<.08;
+  if(!nearEdge || end[2]<.35 || !['Long of the hoop','Wide of the hoop'].includes(trajectory.feedback))return trajectory;
+  // Older saves split at an invisible safety boundary. Keep their recorded
+  // motion, extending the flight through the first recorded floor bounce.
+  const i=trajectory.frames.findIndex((f,i,a)=>i>0 && i<a.length-1 && f[2]<.35 && f[2]<=a[i-1][2] && f[2]<=a[i+1][2]);
+  if(i<0)return trajectory;
+  const delay=trajectory.frames[i][0];
+  return {...trajectory,version:13,
+    flight:[...trajectory.flight,...trajectory.frames.slice(1,i+1).map(f=>[f[0]+trajectory.flightDuration/1000,...f.slice(1)])],
+    flightDuration:trajectory.flightDuration+delay*1000,
+    frames:trajectory.frames.slice(i).map(f=>[f[0]-delay,...f.slice(1)]),duration:trajectory.duration-delay*1000};
+}
 export function validGesture(g) {
   return g && ['dx', 'dy', 'duration'].every(k => Number.isFinite(g[k])) && Math.abs(g.dx) <= 2 && g.dy >= MIN_SWIPE_DISTANCE && g.dy <= 2 && g.duration >= .008 &&
     (g.velocity === undefined || (Number.isFinite(g.velocity) && g.velocity >= 0 && g.velocity <= 100));
@@ -144,7 +159,8 @@ function simulate(gesture, origin, savePath, physicalSpeed = null) {
     }
     frames.push([model.carryDuration,x,y,z]);
   }
-  const impact = (time, kind) => { if (contact === null && !made) { assistTime=0;contact = time; feedback = kind; } };
+  const impact = (time, kind) => { if (contact === null && !made) { assistTime=0;contact = time;if(feedback==='Air ball')feedback = kind; } };
+  const courtLimit = kind => { assistTime=0;shotLive=false;if(contact===null && feedback==='Air ball')feedback=kind; };
   for (let step = 1; step <= 1440; step++) {
     const time = model.carryDuration+step * dt, previousX = x, previousY = y, previousZ = z;
     vy -= 9.81 * dt;
@@ -207,20 +223,20 @@ function simulate(gesture, origin, savePath, physicalSpeed = null) {
       if (vy < 0) { impact(time, z > 2 ? 'Short of the hoop' : z < -.65 ? 'Long of the hoop' : 'Wide of the hoop'); vy = Math.abs(vy) > .5 ? -vy * .72 : 0; vx *= .82; vz *= .82; }
       vx *= .992; vz *= .992;
     }
-    if(x<COURT_BOUNDS.minX){x=COURT_BOUNDS.minX;vx=Math.abs(vx)*.65;shotLive=false;impact(time,'Wide of the hoop');}
-    if(x>COURT_BOUNDS.maxX){x=COURT_BOUNDS.maxX;vx=-Math.abs(vx)*.65;shotLive=false;impact(time,'Wide of the hoop');}
-    if(z<COURT_BOUNDS.minZ){z=COURT_BOUNDS.minZ;vz=Math.abs(vz)*.65;shotLive=false;impact(time,'Long of the hoop');}
-    if(z>COURT_BOUNDS.maxZ){z=COURT_BOUNDS.maxZ;vz=-Math.abs(vz)*.65;shotLive=false;impact(time,'Long of the hoop');}
+    if(x<COURT_BOUNDS.minX){x=COURT_BOUNDS.minX;vx=Math.abs(vx)*.65;courtLimit('Wide of the hoop');}
+    if(x>COURT_BOUNDS.maxX){x=COURT_BOUNDS.maxX;vx=-Math.abs(vx)*.65;courtLimit('Wide of the hoop');}
+    if(z<COURT_BOUNDS.minZ){z=COURT_BOUNDS.minZ;vz=Math.abs(vz)*.65;courtLimit('Long of the hoop');}
+    if(z>COURT_BOUNDS.maxZ){z=COURT_BOUNDS.maxZ;vz=-Math.abs(vz)*.65;courtLimit('Long of the hoop');}
     if(y>COURT_BOUNDS.maxY){y=COURT_BOUNDS.maxY;vy=-Math.abs(vy)*.5;shotLive=false;impact(time,'Too much power');}
     if (!savePath && (made || !shotLive)) return { made };
-    if (savePath && step % 3 === 0) frames.push([time, x, y, z]);
+    if (savePath && (step % 3 === 0 || time===contact)) frames.push([time, x, y, z]);
   }
   if (!savePath) return { made };
   const split = contact === null ? 2 : contact;
   const start = sampleFrames(frames, split * 1000);
   const rebound = [[0, start.x, start.y, start.z], ...frames.filter(f => f[0] > split).map(f => [f[0] - split, ...f.slice(1)])];
   const flight = [...frames.filter(f => f[0] < split), [split, start.x, start.y, start.z]];
-  return { version: 12, points:made ? shotValue(origin) : 0, launchSpeed:speed, netImpact, frames: rebound, flight: made ? frames.filter(f => f[0] <= 3) : flight,
+  return { version: 13, points:made ? shotValue(origin) : 0, launchSpeed:speed, netImpact, frames: rebound, flight: made ? frames.filter(f => f[0] <= 3) : flight,
     duration: rebound.at(-1)[0] * 1000, flightDuration: made ? 3000 : split * 1000, made, feedback, gesture, origin: {x:origin.x,z:origin.z} };
 }
 

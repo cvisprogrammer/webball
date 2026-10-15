@@ -37,9 +37,9 @@ test('manual practice replay includes the shot and allows catching only once the
   const airborne=reboundPosition(trajectory,-reboundLeadIn(trajectory)/2,game.positions[0]);
   assert.throws(()=>practiceAction(game,{action:'catch',...airborne},2000+reboundLeadIn(trajectory)/2),/Replay/);
   assert.equal(game.phase,'rebound');assert.equal(game.rebounds[0],0);
-  const at=game.startedAt+500,point=reboundPosition(trajectory,500,game.positions[0]);
+  const at=game.startedAt+500,elapsed=at-game.startedAt,point=reboundPosition(trajectory,elapsed,game.positions[0]);
   practiceAction(game,{action:'catch',...point},at);
-  const world=reboundWorld(trajectory,500);
+  const world=reboundWorld(trajectory,elapsed);
   assert.deepEqual(game.positions[0],{x:world.x,z:world.z});assert.equal(game.rebounds[0],1);
 });
 

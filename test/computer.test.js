@@ -75,7 +75,7 @@ test('manual computer-match replay watches the stored shot before either player 
     computerAction(match,{action:'start',fromRelease:true},2000,seat);
     assert.equal(match.startedAt,2000+leadIn);
     assert.throws(()=>computerAction(match,{action:'catch',...reboundPosition(trajectory,-leadIn/2,match.positions[seat])},2000+leadIn/2,seat),/Replay/);
-    const at=match.startedAt+500,world=reboundWorld(trajectory,500);
+    const at=match.startedAt+500,world=reboundWorld(trajectory,at-match.startedAt);
     computerAction(match,{action:'catch',...reboundPosition(trajectory,500,match.positions[seat])},at,seat);
     assert.deepEqual(match.positions[seat],{x:world.x,z:world.z});assert.equal(match.turn,seat);
     assert.deepEqual(match.scores,[0,0]);assert.equal(match.rebounds[seat],1);

@@ -4,7 +4,7 @@ import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createGameServer } from '../server.js';
-import { reboundLeadIn, reboundPosition, reboundWorld, courtPosition, START_POSITION } from '../public/physics.js';
+import { reboundLeadIn, reboundPosition, reboundWorld, courtPosition, simulateShot, strokeGuide, START_POSITION } from '../public/physics.js';
 
 test('two players shoot, save an offline rebound, resume after restart and catch it', async () => {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'webball-test-'));
@@ -135,6 +135,27 @@ test('two players shoot, save an offline rebound, resume after restart and catch
     assert.deepEqual(state.scores,scores);assert.equal(state.version,version);assert.equal(state.turn,1);
     const repaired=JSON.parse(await readFile(file,'utf8'));
     assert.deepEqual(repaired[id].positions[1],state.positions[1],'repair persists across refresh and restart');
+    // Resume a miss saved when an airborne safety-limit crossing ended flight.
+    await new Promise(resolve=>server.close(resolve));
+    const guide=strokeGuide(),dy=guide.length*1.3**2,shot=simulateShot({dx:dy*.3,dy,duration:dy/guide.velocity,velocity:guide.velocity});
+    const full=[...shot.flight,...shot.frames.slice(1).map(f=>[f[0]+shot.flightDuration/1000,...f.slice(1)])];
+    const cutIndex=full.findIndex(f=>f[3]<-.7 && f[2]>3),cut=full[cutIndex][0];
+    const legacy={...shot,version:12,flight:full.slice(0,cutIndex+1),flightDuration:cut*1000,
+      frames:full.slice(cutIndex).map(f=>[f[0]-cut,...f.slice(1)]),duration:(full.at(-1)[0]-cut)*1000};
+    repaired[id].trajectory=legacy;repaired[id].phase='rebound';repaired[id].startedAt=time;
+    await writeFile(file,JSON.stringify(repaired));
+    await start();
+    state=(await request(`/api/game?id=${id}`,null,p1)).data;
+    assert.ok(state.trajectory.flightDuration>legacy.flightDuration);assert.equal(state.startedAt,null);
+    assert.equal(state.version,version+1);assert.equal(state.turn,1);assert.deepEqual(state.scores,scores);
+    const migrated=JSON.parse(await readFile(file,'utf8'));
+    assert.deepEqual(migrated[id].trajectory,state.trajectory,'the corrected flight split is saved');
+    state=(await action(p1,{action:'start'})).data;
+    assert.equal(state.startedAt,time+state.trajectory.flightDuration);
+    assert.equal((await action(p1,{action:'catch',x:.5,y:.5})).status,409);
+    time=state.startedAt+500;
+    state=(await action(p1,{action:'catch',...reboundPosition(state.trajectory,500,state.positions[1])})).data;
+    assert.equal(state.phase,'shoot');assert.deepEqual(state.scores,scores);
   } finally {
     if (server?.listening) await new Promise(resolve => server.close(resolve));
     await rm(dataDir, { recursive: true, force: true });

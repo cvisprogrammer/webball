@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { reboundPosition, reboundWorld, reboundLeadIn, reboundDuration, validGesture, simulateShot, START_POSITION, courtPosition } from './public/physics.js';
+import { reboundPosition, reboundWorld, reboundLeadIn, reboundDuration, repairRebound, validGesture, simulateShot, START_POSITION, courtPosition } from './public/physics.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const token = () => randomBytes(24).toString('hex');
@@ -21,6 +21,8 @@ export async function createGameServer({ dataDir = path.join(root, '.data'), now
     const positions = [0,1].map(seat => courtPosition(game.positions?.[seat]));
     if(JSON.stringify(positions)!==JSON.stringify(game.positions)) repaired = true;
     game.positions = positions;
+    const trajectory=repairRebound(game.trajectory);
+    if(trajectory!==game.trajectory){game.trajectory=trajectory;game.startedAt=null;game.version++;repaired=true;}
   }
   let queue = Promise.resolve();
   const save = async () => {

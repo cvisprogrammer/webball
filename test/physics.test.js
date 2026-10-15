@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { simulateShot, sampleFrames, BALL_RADIUS, COURT_BOUNDS, courtPosition, project, reboundLeadIn, reboundWorld, reboundPosition, validGesture, shotGuide, strokeGuide, shotLesson, shotSpeed, shotValue, releaseFeedback, START_POSITION, HOOP, NET_LENGTH, netResponse, netPoint } from '../public/physics.js';
+import { simulateShot, sampleFrames, BALL_RADIUS, COURT_BOUNDS, courtPosition, project, reboundLeadIn, reboundWorld, reboundPlayer, reboundPosition, repairRebound, validGesture, shotGuide, strokeGuide, shotLesson, shotSpeed, shotValue, releaseFeedback, START_POSITION, HOOP, NET_LENGTH, netResponse, netPoint } from '../public/physics.js';
 import { cameraPose } from '../public/physics.js';
 import { PerspectiveCamera, Vector3 } from 'three';
 
@@ -83,6 +83,47 @@ test('rim and backboard physically deflect shots', () => {
   }
   assert.ok(banks.length > 0, 'some shots hit the backboard');
   assert.ok(banks.some(s => s.frames.some((f,i)=>i>0 && f[3]>s.frames[i-1][3])), 'backboard reverses depth velocity');
+});
+
+test('airborne court-limit crossings do not end the shot before a visible impact',()=>{
+  const guide=strokeGuide();
+  for(const [power,side] of[[1.15,0],[1.3,0],[1.3,.3],[1.5,.3]]) {
+    const dy=guide.length*power*power,shot=simulateShot({dx:dy*side,dy,duration:dy/guide.velocity,velocity:guide.velocity});
+    assert.equal(shot.made,false);
+    const [,x,y,z]=shot.flight.at(-1),rimDistance=Math.hypot(Math.hypot(x,z)-HOOP.radius,y-HOOP.y);
+    const contact=y===BALL_RADIUS || y===COURT_BOUNDS.maxY || Math.abs(rimDistance-(BALL_RADIUS+.018))<1e-6 ||
+      (y>2.55 && y<3.85 && Math.abs(x)<.91 && (z===-.33 || z===-.57));
+    assert.ok(contact,`handoff must show a real contact at ${x},${y},${z}`);
+    assert.deepEqual(shot.flight.at(-1).slice(1),shot.frames[0].slice(1));
+    if(power===1.3 && side===.3)assert.ok(shot.flightDuration>1500,'the old airborne cutoff was at about 1.2 seconds');
+  }
+});
+
+test('rebound playback retains the shooter camera and matches catch validation',()=>{
+  const origin={x:1,z:4},receiver={x:-2,z:2},shot=simulateShot({dx:.2,dy:.35,duration:.175},origin);
+  assert.deepEqual(reboundPlayer(shot,receiver),origin);
+  const ball=reboundWorld(shot,500);
+  assert.deepEqual(reboundPosition(shot,500,receiver),project(ball,origin,ball));
+  assert.deepEqual(reboundPlayer({frames:shot.frames},receiver),receiver,'older paths without an origin keep their existing view');
+});
+
+test('repairing an old airborne cutoff preserves every recorded position',()=>{
+  const guide=strokeGuide(),dy=guide.length*1.3**2,shot=simulateShot({dx:dy*.3,dy,duration:dy/guide.velocity,velocity:guide.velocity});
+  const full=[...shot.flight,...shot.frames.slice(1).map(f=>[f[0]+shot.flightDuration/1000,...f.slice(1)])];
+  const i=full.findIndex(f=>f[3]<-.7 && f[2]>3),cut=full[i][0];
+  assert.ok(i>0);
+  const old={...shot,version:12,flight:full.slice(0,i+1),flightDuration:cut*1000,
+    frames:full.slice(i).map(f=>[f[0]-cut,...f.slice(1)]),duration:(full.at(-1)[0]-cut)*1000};
+  const repaired=repairRebound(old);
+  assert.notEqual(repaired,old);assert.equal(repaired.version,13);
+  assert.ok(repaired.flightDuration>old.flightDuration);assert.ok(repaired.flight.at(-1)[2]<.35);
+  assert.equal(repaired.points,old.points);assert.deepEqual(repaired.origin,old.origin);
+  for(let t=0;t<12000;t+=23) {
+    const before=reboundWorld(old,t-old.flightDuration),after=reboundWorld(repaired,t-repaired.flightDuration);
+    assert.ok(Math.hypot(before.x-after.x,before.y-after.y,before.z-after.z)<1e-8);
+  }
+  assert.equal(repairRebound(repaired),repaired);assert.equal(repairRebound(null),null);
+  assert.equal(repairRebound({...old,version:1}).version,1);
 });
 
 test('first-person catch projection matches the WebGL camera from different positions', () => {

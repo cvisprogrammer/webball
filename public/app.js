@@ -1,4 +1,4 @@
-import { reboundPosition, reboundDuration, simulateShot, validGesture, sampleFrames, project, reboundWorld, START_POSITION, courtPosition, releaseFeedback, strokeGuide, shotLesson, shotValue, MAX_SHOT_SPEED, MIN_SWIPE_DISTANCE, netResponse } from './physics.js';
+import { reboundPosition, reboundPlayer, reboundDuration, simulateShot, validGesture, sampleFrames, project, reboundWorld, START_POSITION, courtPosition, releaseFeedback, strokeGuide, shotLesson, shotValue, MAX_SHOT_SPEED, MIN_SWIPE_DISTANCE, netResponse } from './physics.js';
 import { createCourt, pointerPosition } from './court3d.js';
 import { createPractice, practiceAction } from './practice.js';
 import { createComputerMatch, computerAction, computerGesture, computerCatchTime, COMPUTER_LEVELS } from './computer.js';
@@ -272,8 +272,9 @@ function updateStrokeGuide(ready,time) {
 function startLocalRebound(time) {
   if(game.phase!=='rebound' || !game.trajectory)return;
   const seat=game.turn;
-  if(game.computer)computerAction(game,{action:'start'},Date.now(),seat);
-  else practiceAction(game,{action:'start'});
+  const startedAt=Date.now()-(performance.now()-time);
+  if(game.computer)computerAction(game,{action:'start'},startedAt,seat);
+  else practiceAction(game,{action:'start'},startedAt);
   playback={start:time,trajectory:game.trajectory,seat,
     catchAt:seat===1 ? computerCatchTime(game.trajectory) : null};
   render();
@@ -312,16 +313,18 @@ function draw() {
     netState=netResponse(shot.trajectory.netImpact,elapsed/1000);
     position=sampleFrames(shot.trajectory.flight,elapsed);focus=position;
     if(elapsed>=shot.trajectory.flightDuration) {
+      const reboundStart=shot.start+shot.trajectory.flightDuration;
       const made=shot.trajectory.made;
       const opponent=game.computer && shot.seat===1;
       message(game.computer ? made ? `${opponent ? 'Computer scores' : 'Bucket!'} ${shot.trajectory.points} ${shot.trajectory.points===1 ? 'point' : 'points'}. ${opponent ? 'Computer shoots again.' : 'Your ball again! Back to the foul line.'}` : opponent ? 'Computer missed. Catch its rebound!' : 'You missed. Computer gets the rebound.' : made?`Bucket! ${shot.trajectory.points} ${shot.trajectory.points===1 ? 'point' : 'points'}. Back to the foul line. Your ball again!`:game.solo ? game.drill ? `${shot.trajectory.feedback}. Try again from the foul line.` : `${shot.trajectory.feedback}. Tap your rebound or return to the foul line.` : `${shot.trajectory.feedback}. Rebound saved for the other player.`);
       if(!opponent)$('shot-outcome').textContent=made ? `BASKET · ${shot.trajectory.points} ${shot.trajectory.points===1 ? 'POINT' : 'POINTS'}` : 'LAST SHOT · MISS';
       shot=null;strokeLayout=null;
-      if(game.solo && !game.drill && !made)startLocalRebound(performance.now());
+      if(game.solo && !game.drill && !made)startLocalRebound(reboundStart);
       if(game.computer && game.winner!==null)message(game.winner===0 ? `You win ${game.scores[0]}–${game.scores[1]}!` : `Computer wins ${game.scores[1]}–${game.scores[0]}. Try a rematch!`);
       render();
     }
   } else if(game?.phase==='rebound') {
+    player=reboundPlayer(game.trajectory,player);
     const elapsed=playback?performance.now()-playback.start:0;
     position=reboundWorld(game.trajectory,elapsed);focus=position;
     if(playback?.watchingFlight && elapsed>=0){playback.watchingFlight=false;render();}
