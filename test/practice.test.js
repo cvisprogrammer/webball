@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createPractice,practiceAction} from '../public/practice.js';
-import {reboundPosition,reboundWorld,START_POSITION,strokeGuide} from '../public/physics.js';
+import {reboundLeadIn,reboundPosition,reboundWorld,START_POSITION,strokeGuide} from '../public/physics.js';
 
 test('solo shootaround needs no second player, counts baskets, and allows another shot',()=>{
   const game=createPractice();
@@ -26,6 +26,21 @@ test('solo player catches their own miss and shoots from the catch location',()=
   assert.deepEqual(game.positions[0],{x:world.x,z:world.z});
   practiceAction(game,{action:'shoot',gesture},3000);
   assert.deepEqual(game.trajectory.origin,{x:world.x,z:world.z});
+});
+
+test('manual practice replay includes the shot and allows catching only once the bounce starts',()=>{
+  const game=createPractice();
+  practiceAction(game,{action:'shoot',gesture:{dx:.2,dy:.35,duration:.175}},1000);
+  const trajectory=game.trajectory;
+  practiceAction(game,{action:'start',fromRelease:true},2000);
+  assert.equal(game.startedAt,2000+reboundLeadIn(trajectory));
+  const airborne=reboundPosition(trajectory,-reboundLeadIn(trajectory)/2,game.positions[0]);
+  assert.throws(()=>practiceAction(game,{action:'catch',...airborne},2000+reboundLeadIn(trajectory)/2),/Replay/);
+  assert.equal(game.phase,'rebound');assert.equal(game.rebounds[0],0);
+  const at=game.startedAt+500,point=reboundPosition(trajectory,500,game.positions[0]);
+  practiceAction(game,{action:'catch',...point},at);
+  const world=reboundWorld(trajectory,500);
+  assert.deepEqual(game.positions[0],{x:world.x,z:world.z});assert.equal(game.rebounds[0],1);
 });
 
 test('a rebound basket earns one point and returns solo play to a two-point foul-line shot',()=>{

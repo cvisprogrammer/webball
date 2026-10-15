@@ -4,7 +4,7 @@ import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createGameServer } from '../server.js';
-import { reboundPosition, reboundWorld, courtPosition, START_POSITION } from '../public/physics.js';
+import { reboundLeadIn, reboundPosition, reboundWorld, courtPosition, START_POSITION } from '../public/physics.js';
 
 test('two players shoot, save an offline rebound, resume after restart and catch it', async () => {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'webball-test-'));
@@ -50,7 +50,8 @@ test('two players shoot, save an offline rebound, resume after restart and catch
     state=(await action(p0,{action:'shoot',gesture:{dx:0,dy:.025,duration:.5,velocity:.05}})).data;
     assert.equal(state.turn,1);assert.equal(state.phase,'rebound');
     state=(await action(p1,{action:'start'})).data;
-    time+=1000;
+    assert.equal(state.startedAt,time+reboundLeadIn(state.trajectory));
+    time=state.startedAt+1000;
     state=(await action(p1,{action:'catch',...reboundPosition(state.trajectory,1000,state.positions[1])})).data;
     assert.equal(state.turn,1);assert.equal(state.phase,'shoot');
     // Resume a match whose next shooter caught a rebound near the hoop.
@@ -87,7 +88,15 @@ test('two players shoot, save an offline rebound, resume after restart and catch
     state = (await request(`/api/game?id=${id}`, null, p0)).data;
     assert.deepEqual(state.trajectory, trajectory); assert.equal(state.startedAt, null);
     state = (await action(p0, { action: 'start' })).data;
-    time += 1000;
+    assert.equal(state.startedAt,time+reboundLeadIn(trajectory));
+    const airborne=reboundPosition(trajectory,-reboundLeadIn(trajectory),state.positions[0]);
+    assert.equal((await action(p0,{action:'catch',...airborne})).status,409,'the receiver must watch the flight before catching');
+    const bounceStart=state.startedAt;
+    await new Promise(resolve=>server.close(resolve));
+    await start();
+    state=(await request(`/api/game?id=${id}`,null,p0)).data;
+    assert.equal(state.startedAt,bounceStart,'the full-shot replay clock persists across restart');
+    time = bounceStart+1000;
     assert.equal((await action(p0, { action: 'catch', x: 0, y: 0 })).status, 400);
     let ball = reboundPosition(trajectory, 1000, state.positions[0]);
     const caughtSpot = reboundWorld(trajectory, 1000);
@@ -106,6 +115,7 @@ test('two players shoot, save an offline rebound, resume after restart and catch
     time += 13000;
     assert.equal((await action(p1, { action: 'catch', x: .1, y: .8 })).status, 409);
     state = (await action(p1, { action: 'start' })).data;
+    time=state.startedAt;
     ball = reboundPosition(state.trajectory, 0, state.positions[1]);
     state = (await action(p1, { action: 'catch', ...ball })).data;
     assert.deepEqual(state.rebounds, [1, 2]);

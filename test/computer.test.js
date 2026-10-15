@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createComputerMatch,computerAction,computerGesture,computerCatchTime} from '../public/computer.js';
 import {createPractice} from '../public/practice.js';
-import {START_POSITION,strokeGuide,validGesture,shotOnTarget,simulateShot,reboundDuration,reboundPosition,reboundWorld} from '../public/physics.js';
+import {START_POSITION,strokeGuide,validGesture,shotOnTarget,simulateShot,reboundLeadIn,reboundDuration,reboundPosition,reboundWorld} from '../public/physics.js';
 
 const good=origin=>{const guide=strokeGuide(origin);return {dx:0,dy:guide.length,duration:guide.duration,velocity:guide.velocity};};
 const miss={dx:.2,dy:.35,duration:.175};
@@ -65,6 +65,21 @@ test('both players must catch the other player’s actual rebound and shoot from
   computerAction(match,{action:'catch',...humanPoint},4750);
   assert.deepEqual(match.positions[0],{x:humanWorld.x,z:humanWorld.z});
   assert.deepEqual(match.rebounds,[1,1]);assert.equal(match.phase,'shoot');assert.equal(match.turn,0);
+});
+
+test('manual computer-match replay watches the stored shot before either player can catch it',()=>{
+  for(const seat of[0,1]) {
+    const match=createComputerMatch();match.turn=1-seat;
+    computerAction(match,{action:'shoot',gesture:miss},1000,1-seat);
+    const trajectory=match.trajectory,leadIn=reboundLeadIn(trajectory);
+    computerAction(match,{action:'start',fromRelease:true},2000,seat);
+    assert.equal(match.startedAt,2000+leadIn);
+    assert.throws(()=>computerAction(match,{action:'catch',...reboundPosition(trajectory,-leadIn/2,match.positions[seat])},2000+leadIn/2,seat),/Replay/);
+    const at=match.startedAt+500,world=reboundWorld(trajectory,500);
+    computerAction(match,{action:'catch',...reboundPosition(trajectory,500,match.positions[seat])},at,seat);
+    assert.deepEqual(match.positions[seat],{x:world.x,z:world.z});assert.equal(match.turn,seat);
+    assert.deepEqual(match.scores,[0,0]);assert.equal(match.rebounds[seat],1);
+  }
 });
 
 test('an escaped rebound can be replayed without changing scores or the next shooter',()=>{

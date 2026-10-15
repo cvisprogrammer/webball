@@ -1,4 +1,4 @@
-import { START_POSITION, courtPosition, validGesture, simulateShot, reboundDuration, reboundPosition, reboundWorld } from './physics.js';
+import { START_POSITION, courtPosition, validGesture, simulateShot, reboundLeadIn, reboundDuration, reboundPosition, reboundWorld } from './physics.js';
 
 export function createPractice() {
   return { solo:true, seat:0, players:['You',null], scores:[0,0], rebounds:[0,0],
@@ -24,7 +24,7 @@ export function practiceAction(game,body,now=Date.now()) {
       game.positions[0]={...START_POSITION};game.trajectory=null;game.startedAt=null;
     } else{game.phase='rebound';game.trajectory=trajectory;game.startedAt=null;}
   } else if(body.action==='start' && game.phase==='rebound') {
-    game.startedAt=now;
+    game.startedAt=now+(body.fromRelease===true ? reboundLeadIn(game.trajectory) : 0);
   } else if(body.action==='catch' && game.phase==='rebound' && game.startedAt!==null) {
     const elapsed=now-game.startedAt;
     if(elapsed<0 || elapsed>reboundDuration(game.trajectory))throw new Error('The ball got away. Replay the rebound.');

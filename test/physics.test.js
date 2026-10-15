@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { simulateShot, sampleFrames, BALL_RADIUS, COURT_BOUNDS, courtPosition, project, reboundWorld, reboundPosition, validGesture, shotGuide, strokeGuide, shotLesson, shotSpeed, shotValue, releaseFeedback, START_POSITION, HOOP, NET_LENGTH, netResponse, netPoint } from '../public/physics.js';
+import { simulateShot, sampleFrames, BALL_RADIUS, COURT_BOUNDS, courtPosition, project, reboundLeadIn, reboundWorld, reboundPosition, validGesture, shotGuide, strokeGuide, shotLesson, shotSpeed, shotValue, releaseFeedback, START_POSITION, HOOP, NET_LENGTH, netResponse, netPoint } from '../public/physics.js';
 import { cameraPose } from '../public/physics.js';
 import { PerspectiveCamera, Vector3 } from 'three';
 
@@ -57,6 +57,21 @@ test('ball respects the floor, loses bounce energy, and shot/rebound paths meet'
   }
   assert.ok(peaks.length >= 3, 'multiple physical bounces occurred');
   assert.ok(peaks[1] < peaks[0] && peaks[2] < peaks[1], 'restitution dissipates energy');
+});
+
+test('a saved miss replays its exact release and flight continuously into the rebound',()=>{
+  const shot=simulateShot({dx:.2,dy:.35,duration:.175},FAR),leadIn=reboundLeadIn(shot);
+  assert.equal(shot.made,false);assert.equal(leadIn,shot.flightDuration);assert.ok(leadIn>0);
+  for(const t of[0,leadIn/4,leadIn/2,leadIn-1]) {
+    const actual=reboundWorld(shot,t-leadIn),expected=sampleFrames(shot.flight,t);
+    assert.ok(Math.hypot(actual.x-expected.x,actual.y-expected.y,actual.z-expected.z)<1e-9);
+  }
+  assert.deepEqual(reboundWorld(shot,0),sampleFrames(shot.flight,leadIn));
+  assert.deepEqual(reboundWorld(shot,500),sampleFrames(shot.frames,500));
+  assert.equal(reboundLeadIn({...shot,flightDuration:undefined}),leadIn);
+  const old={frames:[[0,1,.5,2],[1,2,.12,3]],duration:1000};
+  assert.equal(reboundLeadIn(old),0);assert.deepEqual(reboundWorld(old,500),sampleFrames(old.frames,500));
+  assert.equal(reboundLeadIn({aim:.5,direction:1}),0,'oldest saved bounces still play without a flight');
 });
 
 test('rim and backboard physically deflect shots', () => {

@@ -1,4 +1,4 @@
-import { START_POSITION, courtPosition, validGesture, simulateShot, strokeGuide, reboundDuration, reboundPosition, reboundWorld } from './physics.js';
+import { START_POSITION, courtPosition, validGesture, simulateShot, strokeGuide, reboundLeadIn, reboundDuration, reboundPosition, reboundWorld } from './physics.js';
 
 export const COMPUTER_LEVELS = {
   easy: { label:'Easy', power:.30, angle:.50 },
@@ -30,7 +30,7 @@ export function computerAction(game,body,now=Date.now(),seat=game.seat) {
       game.trajectory=trajectory;game.turn=1-seat;game.phase='rebound';game.startedAt=null;
     }
   } else if(body.action==='start' && game.phase==='rebound') {
-    game.startedAt=now;
+    game.startedAt=now+(body.fromRelease===true ? reboundLeadIn(game.trajectory) : 0);
   } else if(body.action==='catch' && game.phase==='rebound' && game.startedAt!==null) {
     const elapsed=now-game.startedAt;
     if(!Number.isFinite(elapsed) || elapsed<0 || elapsed>reboundDuration(game.trajectory))throw new Error('The ball got away. Replay the rebound.');

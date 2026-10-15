@@ -90,9 +90,13 @@ export function sampleFrames(frames, elapsed) {
   const a = frames[low], b = frames[high], f = clamp((t - a[0]) / (b[0] - a[0] || 1), 0, 1);
   return { x: a[1] + (b[1] - a[1]) * f, y: a[2] + (b[2] - a[2]) * f, z: a[3] + (b[3] - a[3]) * f };
 }
+// The rebound clock starts at the first impact. Negative time replays the
+// original release and flight before continuing into the stored bounce.
+export const reboundLeadIn = trajectory => trajectory.flight?.length ? Math.max(0,trajectory.flightDuration ?? trajectory.flight.at(-1)[0]*1000) : 0;
 export function reboundWorld(trajectory, elapsed) {
   let ball;
-  if (trajectory.frames) ball = sampleFrames(trajectory.frames,elapsed);
+  if (elapsed<0 && reboundLeadIn(trajectory)>0) ball=sampleFrames(trajectory.flight,reboundLeadIn(trajectory)+elapsed);
+  else if (trajectory.frames) ball = sampleFrames(trajectory.frames,elapsed);
   // Keep rebounds already stored by the first release playable.
   else {
     const t = clamp(elapsed / REBOUND_DURATION, 0, 1);

@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { reboundPosition, reboundWorld, reboundDuration, validGesture, simulateShot, START_POSITION, courtPosition } from './public/physics.js';
+import { reboundPosition, reboundWorld, reboundLeadIn, reboundDuration, validGesture, simulateShot, START_POSITION, courtPosition } from './public/physics.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const token = () => randomBytes(24).toString('hex');
@@ -96,8 +96,8 @@ export async function createGameServer({ dataDir = path.join(root, '.data'), now
             game.turn = 1 - seat; game.phase = 'rebound'; game.startedAt = null;
           }
         } else if (body.action === 'start' && game.phase === 'rebound') {
-          // Starting or resuming always replays the stored bounce from its beginning.
-          game.startedAt = now();
+          // Replay the saved release first; catching begins at the first impact.
+          game.startedAt = now() + reboundLeadIn(game.trajectory);
         } else if (body.action === 'catch' && game.phase === 'rebound' && game.startedAt !== null) {
           const elapsed = now() - game.startedAt;
           if (!Number.isFinite(body.x) || !Number.isFinite(body.y) || elapsed < 0 || elapsed > reboundDuration(game.trajectory))

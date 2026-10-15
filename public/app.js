@@ -65,15 +65,20 @@ function render() {
   if (game.invite) $('invite').value = `${location.origin}/#game=${game.id}&invite=${game.invite}`;
   $('shot-controls').hidden = !(yours && game.phase === 'shoot' && !shot);
   $('start-rebound').hidden = !(yours && game.phase === 'rebound' && !playback && !shot);
-  $('start-rebound').textContent = game.startedAt === null ? 'Play the rebound →' : 'Replay the rebound →';
+  $('start-rebound').textContent = game.startedAt === null ? 'Play shot + rebound →' : 'Replay shot + rebound →';
   $('catch-help').hidden = !playback || !yours;
   $('status').textContent = againstComputer ? finished ? game.winner===0 ? 'You win!' : 'Computer wins. Rematch?' : shot ? shot.seat===1 ? 'Computer is shooting.' : 'Your shot is in the air.' : yours ? game.phase==='rebound' ? 'Catch the computer’s miss!' : 'Your shot.' : game.phase==='rebound' ? 'Computer is chasing your rebound.' : 'Computer is lining up a shot.' : game.solo ? (game.phase==='rebound' ? playback ? 'Chase your rebound.' : 'Your rebound is waiting.' : 'The court is yours.') : game.phase === 'waiting' ? 'Good games need two.' :
     game.phase === 'rebound' ? (yours ? playback ? 'Get that rebound!' : 'A rebound is waiting for you.' : 'Your miss is saved.') :
     yours ? 'Make it count.' : `${game.players[game.turn]} is up next.`;
   $('instruction').textContent = againstComputer ? finished ? `Final score: ${game.scores[0]}–${game.scores[1]}. Choose Play again for a new match.` : shot ? 'Watch the shot. Foul-line baskets earn 2 points; other baskets earn 1.' : yours ? game.phase==='rebound' ? 'Tap the moving ball to catch it. Your next shot starts where you catch it.' : 'Press the ball, swipe upward and release. First to 11 wins.' : 'The computer uses the same court and bounces. Its misses become your rebounds.' : game.solo && game.phase==='rebound' ? (playback ? 'Tap your moving ball to catch it. Your next shot starts right where you catch it.' : 'Replay the rebound, or return to the foul line.') : game.phase === 'waiting' ? 'Share the link below. You’ll take the first shot when they join.' :
-    game.phase === 'rebound' ? (yours ? 'The saved bounce starts when you’re ready. Catch it to shoot from that spot.' : 'The other player can catch this bounce whenever they return.') :
+    game.phase === 'rebound' ? (yours ? playback ? 'Tap the ball as it bounces. Your next shot starts where you catch it.' : 'Replay the previous shot from release, then catch its rebound to shoot from that spot.' : 'The other player can replay your shot and catch its rebound whenever they return.') :
     yours ? `Press the ball, follow the trail with a smooth upward stroke, then release while moving.${game.solo ? game.drill ? ' Repeat the same shot and use the feedback to adjust.' : ' Try the free-throw drill to build a feel for it.' : ''}` : 'You can leave and come back. This game stays right here.';
   if(againstComputer)$('match-banner').textContent=`${finished ? game.winner===0 ? 'YOU WIN' : 'COMPUTER WINS' : shot ? shot.seat===1 ? 'COMPUTER SHOOTING' : 'YOUR SHOT' : yours ? game.phase==='rebound' ? 'YOUR REBOUND' : 'YOUR TURN' : game.phase==='rebound' ? 'COMPUTER REBOUND' : 'COMPUTER’S TURN'} · ${COMPUTER_LEVELS[game.difficulty].label} · first to ${game.target}`;
+  if(playback?.watchingFlight) {
+    $('status').textContent='Watch the previous shot.';
+    $('instruction').textContent='Follow the shot from release, then tap the ball after its first bounce.';
+    $('catch-help').hidden=true;
+  }
 }
 async function refresh() {
   if (!id || game.solo || busy || shot || playback) return;
@@ -159,11 +164,15 @@ async function takeShot(gesture) {
 }
 $('start-rebound').onclick = async () => {
   if(shot || busy || game.turn!==game.seat || game.phase!=='rebound')return;
-  const result = await action({ action: 'start' });
-  if (result) { playback = { start: performance.now(), trajectory: result.trajectory, seat:result.turn }; render(); canvas.focus(); }
+  const result = await action({ action: 'start', fromRelease:true });
+  if (result) {
+    const leadIn=Math.max(0,result.startedAt-(result.serverTime ?? Date.now()));
+    playback = { start:performance.now()+leadIn, trajectory:result.trajectory, seat:result.turn, watchingFlight:leadIn>0 };
+    render(); canvas.focus();
+  }
 };
 async function catchBall(x, y) {
-  if (!playback || shot || busy || game.turn!==game.seat) return;
+  if (!playback || shot || busy || game.turn!==game.seat || performance.now()<playback.start) return;
   const result = await action({ action: 'catch', x, y });
   if (result) { playback = null; message('Rebound caught. Shoot from this spot!'); render(); }
 }
@@ -315,6 +324,7 @@ function draw() {
   } else if(game?.phase==='rebound') {
     const elapsed=playback?performance.now()-playback.start:0;
     position=reboundWorld(game.trajectory,elapsed);focus=position;
+    if(playback?.watchingFlight && elapsed>=0){playback.watchingFlight=false;render();}
     if(playback && elapsed>reboundDuration(playback.trajectory)){playback=null;message('It got away! Replay the saved rebound.');render();}
   }
   updateRangeGuide();
